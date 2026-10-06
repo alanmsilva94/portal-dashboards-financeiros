@@ -1,0 +1,322 @@
+<script>
+/* ===== js/controllers/DashboardController.js ===== */
+/* =========================================================================
+   controllers/DashboardController.js — liga os Models às Views do painel
+
+   Fluxo:  FiltroModel "mudou"  ->  PainelModel.agregar()  ->  View da página
+   Só a página visível é desenhada; as outras ficam marcadas como "sujas" e
+   são desenhadas quando o usuário navega até elas.
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const V = App.views;
+  const { inteiro } = App.utils.formato;
+
+  class DashboardController {
+    constructor(painel, filtro) {
+      this.painel = painel;
+      this.filtro = filtro;
+      this.ultimo = null;
+      this.sujas = new Set();
+    }
+
+    iniciar() {
+      V.GraficoView.lerTokens();
+
+      /* menu, abas, tema e botões do topo são do shell; aqui só o link do aviso */
+      V.LayoutView.ligar({
+        irParaEstados: () => (window.PORTAL_SHELL ? PORTAL_SHELL.irPara("estado") : this.filtro.irPara("estado")),
+      });
+
+      /* troca claro/escuro: relê as cores do tema e redesenha gráficos, legendas e KPIs */
+      document.addEventListener("portal:tema", () => {
+        V.GraficoView.lerTokens();
+        if (!this.ultimo) return;
+        ["receita", "localidade", "estado"].forEach((p) => this.sujas.add(p));
+        this.renderPaginaAtual();
+      });
+
+      V.EstadoView.ligar({
+        ordenar: (col) => this.filtro.ordenarPor(col),
+        alternar: (idx) => this.filtro.alternarEstado(idx),
+        alternarTodos: () => {
+          if (this.ultimo) this.filtro.alternarTodos(this.painel.linhasEstado(this.ultimo).map((l) => l.idx));
+        },
+        buscar: (texto) => this.filtro.buscar(texto),
+      });
+
+      this.filtro.on("mudou", () => this.atualizar());
+      this.filtro.on("tabela", () => this.redesenharTabela());
+      this.filtro.on("pagina", () => {
+        this.renderPaginaAtual();
+        V.GraficoView.redimensionar();
+      });
+
+      let espera = null;
+      window.addEventListener("resize", () => {
+        clearTimeout(espera);
+        espera = setTimeout(V.GraficoView.redimensionar, 180);
+      });
+
+      V.LayoutView.mostrarPainel(false);
+    }
+
+    /* troca a base inteira (importação, base salva ou arquivo .json) */
+    carregar(cubo) {
+      V.GraficoView.apagarTodos();
+      V.LocalidadeView.reiniciar();
+      V.EstadoView.reiniciar();
+
+      this.painel.carregar(cubo);
+      this.filtro.configurar(this.painel.dic);
+      V.FiltroView.montar(this.filtro, this.painel.dic.ano_mes_rotulo);
+      V.LayoutView.mostrarPainel(true);
+
+      this.atualizar();
+      V.GraficoView.redimensionar();
+    }
+
+    atualizar() {
+      if (!this.painel.temDados) return;
+      this.ultimo = this.painel.agregar(this.filtro);
+      ["receita", "localidade", "estado"].forEach((p) => this.sujas.add(p));
+      this.renderPaginaAtual();
+
+      V.FiltroView.atualizar(this.filtro);
+      V.LayoutView.status(this.ultimo.qtd, this.rotuloPeriodo());
+      V.LayoutView.avisos(this.painel.avisos(this.ultimo));
+    }
+
+    renderPaginaAtual() {
+      const p = this.filtro.pagina;
+      if (!this.painel.temDados || !this.ultimo || !this.sujas.has(p)) return;
+      const D = this.painel.dic;
+      if (p === "receita") V.ReceitaView.render(this.ultimo, D);
+      else if (p === "localidade") V.LocalidadeView.render(this.ultimo, D);
+      else V.EstadoView.render(this.painel.consultaEstados(this.ultimo, this.filtro.tabela));
+      this.sujas.delete(p);
+      V.GraficoView.redimensionar();
+    }
+
+    /* ordenar ou abrir um estado só mexe na tabela */
+    redesenharTabela() {
+      if (!this.ultimo) return;
+      V.EstadoView.renderTabela(this.painel.consultaEstados(this.ultimo, this.filtro.tabela));
+    }
+
+    rotuloPeriodo() {
+      const r = this.painel.dic.ano_mes_rotulo;
+      const f = this.filtro;
+      return f.mesDe === f.mesAte ? r[f.mesDe] : `${r[f.mesDe]} a ${r[f.mesAte]}`;
+    }
+
+    /* recorte filtrado por PDV: separador ";" e vírgula decimal (Excel pt-BR) */
+    exportarCsv() {
+      if (!this.ultimo) {
+        V.LayoutView.toast("Aguarde o carregamento dos dados para exportar.");
+        return;
+      }
+      const linhas = this.painel.recortePorPdv(this.ultimo);
+      const dec = (v) => v.toFixed(2).replace(".", ",");
+      const cabecalho = ["PDV", "Igreja", "Descricao", "Regiao", "Estado", "Municipio", "Modelo",
+        "Transacoes", "Movimentacao", "Receita"];
+      const corpo = linhas.map((d) =>
+        [d.pdv, d.igreja, d.desc_igreja, d.regiao, d.estado, d.municipio, d.modelo,
+          d.transacoes, dec(d.movimentacao), dec(d.receita)]
+          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .join(";")
+      );
+      const csv = "\uFEFF" + [cabecalho.join(";")].concat(corpo).join("\r\n");
+      const D = this.painel.dic;
+      V.LayoutView.baixar(csv, `pdvs_${D.ano_mes[this.filtro.mesDe]}_a_${D.ano_mes[this.filtro.mesAte]}.csv`,
+        "text/csv;charset=utf-8;");
+      V.LayoutView.toast(`${inteiro(linhas.length)} PDVs exportados.`);
+    }
+  }
+
+  App.controllers.DashboardController = DashboardController;
+})(window.App);
+
+/* ===== js/controllers/FiltroController.js ===== */
+/* =========================================================================
+   controllers/FiltroController.js — traduz cliques da barra de filtros em
+   alterações no FiltroModel (que, por sua vez, avisa o DashboardController)
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  class FiltroController {
+    constructor(filtro, painel) {
+      this.filtro = filtro;
+      this.painel = painel;
+    }
+
+    iniciar() {
+      const f = this.filtro;
+      App.views.FiltroView.ligar({
+        podeAbrir: () => this.painel.temDados,
+        marcar: (chave, i, ok) => f.marcar(chave, i, ok),
+        marcarVarios: (chave, lista, ok) => f.marcarVarios(chave, lista, ok),
+        periodo: (de, ate, quem) => f.definirPeriodo(de, ate, quem),
+        limparFiltro: (chave) => f.limparFiltro(chave),
+        limparPeriodo: () => f.limparPeriodo(),
+        limparTudo: () => f.limparTudo(),
+      });
+    }
+  }
+
+  App.controllers.FiltroController = FiltroController;
+})(window.App);
+
+/* ===== CargaController (substitui a importação por pasta/arquivo) ===== */
+/* =========================================================================
+   controllers/CargaController.js — Drive (via PORTAL.carregar) -> cubo -> painel
+
+   Orquestra: PORTAL.carregar('maquinas') -> PlanilhaModel.ler -> CuboModel.montar ->
+   DashboardController.carregar(). Roda ao abrir a página e no botão "Atualizar dados".
+   Em caso de erro durante uma atualização, o painel continua com os dados anteriores.
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const M = App.models;
+  const V = App.views;
+  const FMT = App.utils.formato;
+  const CHAVE = "maquinas";
+  const dois = (n) => String(n).padStart(2, "0");
+  /* dd/mm/aaaa hh:mm */
+  const dataHoraCurta = (d) =>
+    `${dois(d.getDate())}/${dois(d.getMonth() + 1)}/${d.getFullYear()} ${dois(d.getHours())}:${dois(d.getMinutes())}`;
+
+  const logConsole = {
+    info: () => {},
+    ok: () => {},
+    aviso: (t) => { try { console.warn("[maquinas] " + t); } catch (e) { /* sem console */ } },
+    erro: (t) => { try { console.error("[maquinas] " + t); } catch (e) { /* sem console */ } },
+  };
+
+  class CargaController {
+    constructor(dashboard) {
+      this.dashboard = dashboard;
+      this.ocupado = false;
+    }
+
+    iniciar() {
+      /* "Atualizar dados" é o botão do shell (cfg.atualizar); aqui só a nova tentativa após erro */
+      document.getElementById("btnTentar").addEventListener("click", () => this.carregar(true));
+    }
+
+    async carregar(manual) {
+      if (this.ocupado) return;
+      this.ocupado = true;
+      const temDados = this.dashboard.painel.temDados;
+
+      const t0 = performance.now();
+      const seg = () => Math.round((performance.now() - t0) / 1000);
+      let etapa = "Buscando a base no Drive";
+      const pintar = () => {
+        const txt = `${etapa}… ${seg()} s`;
+        if (temDados) V.LayoutView.carregando(true, txt);
+        else V.LayoutView.cargaTempo(txt);
+      };
+      pintar();
+      if (temDados) V.LayoutView.carregando(true, "Atualizando os dados…");
+      else V.LayoutView.cargaInicial("carregando", "Carregando os dados…", "Buscando a base no Drive. Isso leva alguns segundos.");
+      const relogio = setInterval(pintar, 1000);
+
+      try {
+        if (typeof PORTAL === "undefined" || !PORTAL.carregar) throw new Error("Biblioteca de dados (portal_dados) não carregada.");
+        const resultado = await PORTAL.carregar(CHAVE, {
+          cellDates: true,
+          onProgress: (feitos, total) => {
+            etapa = `Processando arquivos (${feitos}/${total})`;
+            pintar();
+          },
+        });
+        etapa = "Montando as análises";
+        pintar();
+        await new Promise((r) => setTimeout(r, 0)); /* deixa a tela repintar */
+
+        const base = await M.PlanilhaModel.ler(resultado.itens, logConsole);
+        const cubo = M.CuboModel.montar(base, "Drive");
+        const gerado = resultado.geradoEm ? new Date(resultado.geradoEm) : null;
+        const rotuloGerado = gerado && !isNaN(gerado) ? FMT.dataHora(gerado) : cubo.meta.gerado_em;
+        cubo.meta.gerado_em = rotuloGerado;
+        cubo.meta.fonte = `Drive · dados de ${rotuloGerado}`;
+
+        this.dashboard.carregar(cubo);
+        V.LayoutView.carregando(false);
+        if (window.PORTAL_SHELL) {
+          PORTAL_SHELL.setStatus({
+            fonte: `Fonte: Google Drive · ${FMT.inteiro(resultado.itens.length)} planilhas`,
+            dados: dataHoraCurta(gerado && !isNaN(gerado) ? gerado : new Date()),
+          });
+        }
+        V.LayoutView.toast(
+          manual
+            ? `Dados atualizados: ${FMT.inteiro(cubo.meta.qtd_transacoes)} transações, ${cubo.meta.periodo_inicio} a ${cubo.meta.periodo_fim}.`
+            : `Dados de ${rotuloGerado} carregados em ${seg()} s.`,
+          "ok"
+        );
+        if (base.avisos.length) {
+          V.LayoutView.toast(`${base.avisos.length} coluna(s) da planilha não foram reconhecidas — veja o aviso no topo.`, "aviso");
+        }
+        App.instancia && (App.instancia.ultimaCarga = { segundos: (performance.now() - t0) / 1000, geradoEm: resultado.geradoEm });
+      } catch (erro) {
+        const msg = (erro && erro.message) || String(erro);
+        V.LayoutView.carregando(false);
+        if (temDados) {
+          V.LayoutView.toast(`Não foi possível atualizar: ${msg}. O painel segue com os dados anteriores.`, "aviso");
+        } else {
+          V.LayoutView.cargaInicial("erro", "Não foi possível carregar os dados", msg);
+          if (window.PORTAL_SHELL) PORTAL_SHELL.setStatus({ erro: msg });
+        }
+        try { console.error("[maquinas] falha na carga:", erro); } catch (e) { /* sem console */ }
+      } finally {
+        clearInterval(relogio);
+        this.ocupado = false;
+      }
+    }
+  }
+
+  App.controllers.CargaController = CargaController;
+})(window.App);
+
+/* ===== js/app.js ===== */
+/* =========================================================================
+   app.js — ponto de entrada (substitui o main.py)
+
+   Cria os Models, entrega-os aos Controllers e dispara a carga automática
+   dos dados (PORTAL.carregar('maquinas')).
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const painel = new App.models.PainelModel();
+    const filtro = new App.models.FiltroModel();
+
+    const dashboard = new App.controllers.DashboardController(painel, filtro);
+    const filtros = new App.controllers.FiltroController(filtro, painel);
+    const carga = new App.controllers.CargaController(dashboard);
+
+    dashboard.iniciar();
+    filtros.iniciar();
+    carga.iniciar();
+
+    /* a aba aberta pelo link (#/estado) vale desde o início */
+    if (window.PORTAL_SHELL && PORTAL_SHELL.ativa()) filtro.pagina = PORTAL_SHELL.ativa();
+
+    /* exposto para depuração no console (F12): App.instancia.painel.cubo etc. */
+    App.instancia = { painel, filtro, dashboard, filtros, carga };
+
+    carga.carregar(false);
+  });
+})(window.App);
+
+</script>

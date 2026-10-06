@@ -1,0 +1,1291 @@
+<script>
+/* ===== js/views/GraficoView.js ===== */
+/* =========================================================================
+   views/GraficoView.js — tudo o que fala com o Plotly, mais os mini gráficos
+   SVG dos KPIs
+
+   Cores, fonte e paleta saem das variáveis CSS (css/01-tokens.css): trocar o
+   tema muda também os gráficos. Regras seguidas:
+     * a cor acompanha a CATEGORIA, não a posição no ranking — filtrar não
+       repinta quem continua na tela;
+     * no máximo 8 fatias coloridas; o resto vira "Outros" em cinza;
+     * "Sem localidade" usa a cor de alerta e "Não informado" fica neutro;
+     * um eixo só por gráfico (a segunda medida vai para o tooltip).
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const { esc } = App.utils.texto;
+  const { pct } = App.utils.formato;
+
+  const CONFIG_PLOTLY = {
+    displaylogo: false,
+    responsive: true,
+    scrollZoom: false,
+    /* sendDataToCloud/editInChartStudio enviariam os dados para a internet */
+    modeBarButtonsToRemove: ["select2d", "lasso2d", "autoScale2d", "toggleSpikelines", "sendDataToCloud", "editInChartStudio"],
+    toImageButtonOptions: { format: "png", filename: "dashboard-maquinas", scale: 2 },
+  };
+
+  const MAX_FATIAS = 8;
+  const NEUTROS = new Set(["Não informado", "Sem cadastro", "Outros"]);
+
+  /* cores vêm do shell (PORTAL_SHELL.cor lê as variáveis CSS do tema atual) */
+  const token = (nome, alternativa) => {
+    let v = "";
+    try { v = window.PORTAL_SHELL ? PORTAL_SHELL.cor(nome) : ""; } catch (e) { v = ""; }
+    return v || alternativa;
+  };
+
+  const G = {
+    COR: {},
+    FONTE: "",
+    paleta: [],
+    desenhados: new Set(),
+
+    /* lê as cores do tema atual; chamado na partida e a cada troca claro/escuro */
+    lerTokens() {
+      G.COR = {
+        primaria: token("graf-1", "#0051D5"),
+        primariaForte: token("graf-2", "#003594"),
+        qtd: token("graf-6", "#0EA5E9"),
+        linha: token("graf-2", "#003594"),
+        neutra: token("graf-8", "#94A3B8"),
+        alerta: token("warn", "#B45309"),
+        grade: token("graf-grade", "#E2E8F0"),
+        borda: token("outline-variant", "#C3C6D6"),
+        txt: token("on-surface", "#0B1C30"),
+        txt2: token("graf-texto", "#64748B"),
+        txt3: token("graf-texto", "#64748B"),
+        card: token("lowest", "#FFFFFF"),
+        fundo2: token("container", "#E6EEFF"),
+        ttBg: token("graf-tt-bg", "rgba(11,28,48,.94)"),
+        ttTxt: token("graf-tt-texto", "#DBE4F5"),
+      };
+      G.FONTE = 'Inter, system-ui, -apple-system, "Segoe UI", sans-serif';
+      const css = Array.from({ length: MAX_FATIAS }, (_, i) => token(`graf-${i + 1}`, ""));
+      G.paleta = css.every(Boolean) ? css : App.Config.paleta.slice(0, MAX_FATIAS);
+    },
+
+    /* "#0051D5" + 0.12 -> "rgba(0,81,213,0.12)" (preenchimento de área) */
+    alfa(hex, a) {
+      const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+      if (!m) return hex;
+      const n = parseInt(m[1], 16);
+      return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+    },
+
+    /* ---------------------------------------------------- cor por categoria */
+
+    /* cor estável de um rótulo, pela posição no DICIONÁRIO (não no ranking) */
+    corDe(rotulo, dicionario) {
+      if (rotulo === App.Config.regras.semLocalidade) return G.COR.alerta;
+      if (NEUTROS.has(rotulo)) return G.COR.neutra;
+      const coloridos = dicionario.filter((d) => !NEUTROS.has(d) && d !== App.Config.regras.semLocalidade);
+      const i = coloridos.indexOf(rotulo);
+      return i >= 0 && i < MAX_FATIAS ? G.paleta[i] : G.COR.neutra;
+    },
+
+    /* ranking para rosca: até 8 categorias; acima disso as menores viram "Outros".
+       Com mais de 8, a cor passa a seguir a posição (não há 9ª cor distinguível). */
+    fatias(valores, dicionario) {
+      const r = G.ranking(valores, dicionario, true);
+      let { rotulos, valores: vals } = r;
+      if (rotulos.length > MAX_FATIAS) {
+        const resto = vals.slice(MAX_FATIAS - 1).reduce((a, b) => a + b, 0);
+        rotulos = rotulos.slice(0, MAX_FATIAS - 1).concat("Outros");
+        vals = vals.slice(0, MAX_FATIAS - 1).concat(resto);
+      }
+      const semLocal = App.Config.regras.semLocalidade;
+      const coloridos = dicionario.filter((d) => !NEUTROS.has(d) && d !== semLocal).length;
+      const porPosicao = coloridos > MAX_FATIAS;
+      let n = 0;
+      const cores = rotulos.map((rot) => {
+        if (!porPosicao || NEUTROS.has(rot) || rot === semLocal) return G.corDe(rot, dicionario);
+        return G.paleta[n++ % MAX_FATIAS];
+      });
+      return { rotulos, valores: vals, cores };
+    },
+
+    /* ---------------------------------------------------- layout */
+
+    layoutBase(extra) {
+      const C = G.COR;
+      const base = {
+        separators: ",.",
+        font: { family: G.FONTE, size: 12, color: C.txt2 },
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+        margin: { l: 62, r: 16, t: 10, b: 40 },
+        showlegend: false,
+        hovermode: "closest",
+        barcornerradius: 4,
+        hoverlabel: {
+          bgcolor: C.ttBg,
+          bordercolor: C.ttBg,
+          font: { family: G.FONTE, size: 12.5, color: C.ttTxt },
+          align: "left",
+        },
+        xaxis: { gridcolor: C.grade, zeroline: false, linecolor: C.grade, automargin: true },
+        yaxis: { gridcolor: C.grade, zeroline: false, linecolor: C.grade, automargin: true },
+      };
+      const saida = Object.assign(base, extra || {});
+      /* Plotly quebra se uma chave de eixo existir valendo undefined (roscas) */
+      Object.keys(saida).forEach((k) => saida[k] === undefined && delete saida[k]);
+      return saida;
+    },
+
+    /* rosca com o total no centro */
+    layoutRosca(centro, legenda) {
+      return G.layoutBase({
+        margin: { l: 8, r: 8, t: 8, b: 8 },
+        xaxis: undefined,
+        yaxis: undefined,
+        annotations: centro
+          ? [{
+              text: `<b>${esc(centro)}</b>` +
+                (legenda ? `<br><span style="font-size:11px;color:${G.COR.txt3}">${esc(legenda)}</span>` : ""),
+              showarrow: false,
+              font: { family: G.FONTE, size: 17, color: G.COR.txt },
+              x: 0.5,
+              y: 0.5,
+            }]
+          : [],
+      });
+    },
+
+    eixoValor: (extra) => Object.assign({ gridcolor: G.COR.grade, zeroline: false, automargin: true }, extra),
+    eixoCategoria: (extra) =>
+      Object.assign({ gridcolor: "rgba(0,0,0,0)", linecolor: G.COR.grade, automargin: true }, extra),
+
+    rosca(rotulos, valores, cores, template, buraco) {
+      return [{
+        type: "pie",
+        hole: buraco || 0.68,
+        labels: rotulos,
+        values: valores,
+        sort: false,
+        direction: "clockwise",
+        textinfo: "none", /* os números ficam na legenda HTML */
+        marker: { colors: cores, line: { color: G.COR.card, width: 2 } },
+        hovertemplate: template,
+      }];
+    },
+
+    /* inclinação dos rótulos do eixo x conforme quantidade e tamanho */
+    angulo(rotulos) {
+      const maior = rotulos.reduce((m, x) => Math.max(m, String(x).length), 0);
+      if (rotulos.length <= 4 && maior <= 20) return 0;
+      if (rotulos.length > 7 || maior > 14) return -30;
+      if (rotulos.length > 4 && maior > 9) return -18;
+      return 0;
+    },
+
+    /* ---------------------------------------------------- desenho */
+
+    marcarVazio(alvo, vazio) {
+      const corpo = alvo.closest(".chart-corpo");
+      alvo.classList.toggle("is-empty", vazio);
+      if (!corpo) return;
+      let aviso = corpo.querySelector(".chart-empty");
+      if (vazio && !aviso) {
+        aviso = document.createElement("p");
+        aviso.className = "chart-empty";
+        aviso.textContent = "Nenhum dado para os filtros selecionados.";
+        corpo.appendChild(aviso);
+      } else if (!vazio && aviso) {
+        aviso.remove();
+      }
+    },
+
+    desenhar(id, dados, layout) {
+      const alvo = document.getElementById(id);
+      if (!alvo) return;
+
+      const vazio =
+        !dados || !dados.length || dados.every((t) => (t.values ? !t.values.length : !t.x || !t.x.length));
+      G.marcarVazio(alvo, vazio);
+
+      if (vazio) {
+        if (G.desenhados.has(id)) {
+          Plotly.purge(alvo);
+          G.desenhados.delete(id);
+        }
+        return;
+      }
+      if (!G.desenhados.has(id)) {
+        Plotly.newPlot(alvo, dados, layout, CONFIG_PLOTLY);
+        G.desenhados.add(id);
+      } else {
+        Plotly.react(alvo, dados, layout, CONFIG_PLOTLY);
+      }
+    },
+
+    apagar(id) {
+      if (!G.desenhados.has(id)) return;
+      const alvo = document.getElementById(id);
+      if (alvo) Plotly.purge(alvo);
+      G.desenhados.delete(id);
+    },
+
+    apagarTodos() {
+      Array.from(G.desenhados).forEach(G.apagar);
+    },
+
+    redimensionar() {
+      document
+        .querySelectorAll("[data-pagina]:not([hidden]) .chart-canvas, [data-pagina]:not([hidden]) .mini-rosca-canvas")
+        .forEach((c) => G.desenhados.has(c.id) && Plotly.Plots.resize(c));
+    },
+
+    /* legenda HTML ao lado da rosca */
+    legenda(id, rotulos, valores, cores, formatar) {
+      const alvo = document.getElementById(id);
+      if (!alvo) return;
+      if (!rotulos.length) {
+        alvo.innerHTML = '<p class="empty-inline">Sem dados no filtro.</p>';
+        return;
+      }
+      const total = valores.reduce((a, b) => a + b, 0) || 1;
+      alvo.innerHTML = rotulos
+        .map(
+          (rotulo, i) => `
+        <div class="legend-item">
+          <span class="legend-dot" style="background:${esc(cores[i])}"></span>
+          <span class="legend-label" title="${esc(rotulo)}">${esc(rotulo)}</span>
+          <span class="legend-value">${esc(formatar(valores[i]))}</span>
+          <span class="legend-pct">${esc(pct((valores[i] / total) * 100))} do total</span>
+        </div>`
+        )
+        .join("");
+    },
+
+    /* ---------------------------------------------------- mini gráficos dos KPIs */
+
+    /* linha de tendência em SVG puro; title nativo dá o valor de cada mês */
+    sparkline(id, valores, rotulos, formatar, cor) {
+      const alvo = document.getElementById(id);
+      if (!alvo) return;
+      if (!valores || valores.length < 2) {
+        alvo.innerHTML = "";
+        return;
+      }
+      const L = 240, A = 34, m = 3;
+      const max = Math.max(...valores), min = Math.min(...valores);
+      const faixa = max - min || 1;
+      const pts = valores.map((v, i) => [
+        m + (i * (L - 2 * m)) / (valores.length - 1),
+        m + (A - 2 * m) * (1 - (v - min) / faixa),
+      ]);
+      const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+      const c = cor || G.COR.primaria;
+      const fim = pts[pts.length - 1];
+      alvo.innerHTML = `
+        <svg class="spark" viewBox="0 0 ${L} ${A}" preserveAspectRatio="none" role="img"
+             aria-label="Tendência mensal: ${esc(rotulos[0])} a ${esc(rotulos[rotulos.length - 1])}">
+          <path d="${d} L${fim[0].toFixed(1)},${A} L${pts[0][0].toFixed(1)},${A} Z" fill="${c}" opacity=".10"/>
+          <path d="${d}" fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+                vector-effect="non-scaling-stroke"/>
+          ${pts.map((p, i) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="6" fill="transparent">
+              <title>${esc(rotulos[i])}: ${esc(formatar(valores[i]))}</title></circle>`).join("")}
+          <circle cx="${fim[0].toFixed(1)}" cy="${fim[1].toFixed(1)}" r="3" fill="${c}"/>
+        </svg>`;
+    },
+
+    /* barra de proporção com legenda embaixo */
+    proporcao(id, parte, rotuloEsq, rotuloDir, cor) {
+      const alvo = document.getElementById(id);
+      if (!alvo) return;
+      const p = Math.max(0, Math.min(100, parte || 0));
+      alvo.innerHTML = `
+        <div class="portal-progress" role="img" aria-label="${esc(rotuloEsq)}">
+          <i style="width:${p.toFixed(1)}%${cor ? ";background:" + cor : ""}"></i>
+        </div>
+        <div class="kpi-barra-legenda"><span>${esc(rotuloEsq)}</span><span>${esc(rotuloDir)}</span></div>`;
+    },
+  };
+
+  /* ordena valores junto com rótulos, descartando os zeros */
+  G.ranking = function (valores, rotulos, decrescente) {
+    const pares = [];
+    for (let i = 0; i < valores.length; i++) if (valores[i] > 0) pares.push([rotulos[i], valores[i]]);
+    pares.sort((a, b) => (decrescente ? b[1] - a[1] : a[1] - b[1]));
+    return { rotulos: pares.map((p) => p[0]), valores: pares.map((p) => p[1]) };
+  };
+
+  /* KPI: valor no id e texto de apoio no id + "Apoio" */
+  G.kpi = function (id, valor, apoio) {
+    const a = document.getElementById(id);
+    if (a) a.textContent = valor;
+    if (apoio !== undefined) {
+      const b = document.getElementById(id + "Apoio");
+      if (b) b.textContent = apoio;
+    }
+  };
+
+  App.views.GraficoView = G;
+})(window.App);
+
+/* ===== js/views/LayoutView.js ===== */
+/* =========================================================================
+   views/LayoutView.js — peças de apoio da página: avisos, chips de status,
+   tela de espera, sobreposição de carregamento, toasts e download de arquivo.
+   Menu, barra superior, abas e tema são do shell (PORTAL_SHELL).
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const { esc } = App.utils.texto;
+  const { inteiro, moeda, pct } = App.utils.formato;
+  const el = (id) => document.getElementById(id);
+  const ICO = (nome) => `<span class="material-symbols-outlined">${nome}</span>`;
+
+  App.views.LayoutView = {
+    /* handlers: irParaEstados() — link do aviso "PDVs sem localidade" */
+    ligar(h) {
+      document.addEventListener("click", (ev) => {
+        if (ev.target.closest("[data-ir-estado]")) h.irParaEstados();
+      });
+    },
+
+    /* alterna entre a tela de espera e o painel */
+    mostrarPainel(temDados) {
+      document.body.classList.toggle("sem-dados", !temDados);
+      if (!temDados) {
+        document.querySelectorAll(".aviso-host").forEach((h) => (h.innerHTML = ""));
+        if (window.PORTAL_SHELL) PORTAL_SHELL.setStatus({});
+      }
+    },
+
+    /* tela de espera (1ª carga): estado "carregando" ou "erro com botão de nova tentativa" */
+    cargaInicial(estado, titulo, texto) {
+      const erro = estado === "erro";
+      el("cargaTitulo").textContent = titulo;
+      el("cargaTexto").textContent = erro ? "" : texto || "";
+      el("cargaTexto").hidden = erro;
+      el("cargaErro").hidden = !erro;
+      el("cargaErroTexto").textContent = erro ? texto || "" : "";
+      el("btnTentar").hidden = !erro;
+      el("cargaBarra").hidden = erro;
+      if (!erro) el("cargaTempo").textContent = "";
+    },
+
+    cargaTempo(texto) {
+      el("cargaTempo").textContent = texto || "";
+    },
+
+    /* chip de cada página: transações no filtro + período */
+    status(qtd, periodo) {
+      document.querySelectorAll(".st-filtro").forEach((chip) => {
+        chip.textContent = `${inteiro(qtd)} transações no filtro · ${periodo}`;
+        chip.classList.toggle("ok", qtd > 0);
+        chip.classList.toggle("warn", qtd === 0);
+      });
+    },
+
+    /* avisos: colunas não reconhecidas (todas as páginas) e PDVs sem localidade (Análise de Receita) */
+    avisos(lista) {
+      const colunas = lista.filter((a) => a.tipo !== "semLocalidade").map((a) => `
+        <div class="portal-callout warn">
+          <div class="row gap-3 top">
+            <div class="ic">${ICO("warning")}</div>
+            <div><div class="tt">${esc(a.titulo)}</div>
+              <p>${esc(a.detalhe || "")} Os valores aparecem como “Não informado” até a coluna ser reconhecida.</p></div>
+          </div>
+        </div>`).join("");
+
+      const sem = lista.filter((a) => a.tipo === "semLocalidade").map((a) => `
+        <div class="portal-callout warn">
+          <div class="row gap-3 top">
+            <div class="ic">${ICO("warning")}</div>
+            <div><div class="tt">${esc(inteiro(a.pdvs))} PDVs sem localidade</div>
+              <p>${esc(inteiro(a.pdvs))} PDVs sem localidade representam <b>${esc(moeda(a.receita))}</b>
+                (${esc(pct(a.parteReceita))} da receita; ${esc(pct(a.partePdv))} do parque). Eles ficam fora do ranking
+                por estado — confira o <code>ID_Igreja</code> na aba Maquinas e o Estado na aba Igrejas.</p></div>
+          </div>
+          <button class="portal-link" type="button" data-ir-estado>Ver consulta por estado ${ICO("arrow_forward")}</button>
+        </div>`).join("");
+
+      document.querySelectorAll(".aviso-host").forEach((host) => {
+        host.innerHTML = host.closest('[data-pagina="receita"]') ? sem + colunas : colunas;
+      });
+    },
+
+    carregando(ativo, texto) {
+      const caixa = el("carregando");
+      if (!caixa) return;
+      if (texto) el("carregandoTexto").textContent = texto;
+      caixa.hidden = !ativo;
+    },
+
+    toast(texto) {
+      if (window.PORTAL_SHELL) PORTAL_SHELL.toast(texto);
+    },
+
+    /* entrega um arquivo gerado no navegador (CSV). Dentro do iframe do Apps Script o download
+       pode ser bloqueado: 1) <a download> com Blob; 2) nova aba com o Blob; 3) caixa de texto
+       para copiar o conteúdo e colar no Excel/Bloco de Notas. */
+    baixar(conteudo, nome, tipo) {
+      const blob = conteudo instanceof Blob ? conteudo : new Blob([conteudo], { type: tipo });
+      try {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = nome;
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        return;
+      } catch (erro) {
+        /* segue para o plano B */
+      }
+      try {
+        const url = URL.createObjectURL(blob);
+        const aba = window.open(url, "_blank");
+        if (aba) return;
+      } catch (erro) {
+        /* segue para o plano C */
+      }
+      const texto = typeof conteudo === "string" ? conteudo : "";
+      const caixa = document.createElement("div");
+      caixa.className = "fallback-box";
+      caixa.textContent = "O navegador bloqueou o download. Copie o texto abaixo e cole numa planilha:";
+      const area = document.createElement("textarea");
+      area.readOnly = true;
+      area.value = texto.replace(/^\uFEFF/, "");
+      caixa.appendChild(area);
+      el("fallbackHost").appendChild(caixa);
+      area.focus();
+      area.select();
+      setTimeout(() => caixa.remove(), 60000);
+    },
+  };
+})(window.App);
+
+/* ===== js/views/FiltroView.js ===== */
+/* =========================================================================
+   views/FiltroView.js — faixa de filtros fixa do shell: multiselects, período
+   (De mês/ano até mês/ano), chips removíveis e "Limpar filtros"
+
+   Desenha a partir do FiltroModel e devolve as intenções do usuário pelos
+   handlers do FiltroController. Não altera estado por conta própria.
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const { esc } = App.utils.texto;
+  const el = (id) => document.getElementById(id);
+  const ICO = (nome) => `<span class="material-symbols-outlined">${nome}</span>`;
+
+  function fecharPopovers() {
+    document.querySelectorAll("#filtroCampos .ms.is-open").forEach((ms) => {
+      ms.classList.remove("is-open");
+      ms.querySelector(".ms-pop").hidden = true;
+      ms.querySelector(".ms-toggle").setAttribute("aria-expanded", "false");
+    });
+  }
+
+  /* mantém o popover dentro da tela em celulares */
+  function ajustarPopover(ms) {
+    const pop = ms.querySelector(".ms-pop");
+    pop.style.left = "0px";
+    const r = pop.getBoundingClientRect();
+    if (r.right > window.innerWidth - 8) pop.style.left = `${window.innerWidth - 8 - r.right}px`;
+    const rt = pop.getBoundingClientRect();
+    if (rt.left < 8) pop.style.left = `${8 - rt.left}px`;
+  }
+
+  App.views.FiltroView = {
+    fecharPopovers,
+
+    /* esqueleto da faixa (uma vez); a faixa só aparece quando há dados (montar) */
+    construir() {
+      const host = el("filtros");
+      if (!host || el("filtroCampos")) return;
+      host.innerHTML = `
+        <button class="portal-btn" type="button" id="btnFiltros" aria-expanded="true" aria-controls="filtroCampos">
+          ${ICO("filter_list")}Filtros
+        </button>
+        <div class="fl-campos" id="filtroCampos"></div>
+        <div class="fl-periodo" id="filtroPeriodo">
+          <label for="mesDe">De <select class="portal-sel" id="mesDe"></select></label>
+          <label for="mesAte">até <select class="portal-sel" id="mesAte"></select></label>
+        </div>
+        <div class="fl-chips" id="chips" aria-live="polite"></div>
+        <button class="portal-btn" type="button" id="limparTudo" hidden>${ICO("filter_alt_off")}Limpar filtros</button>`;
+    },
+
+    /* (re)cria os campos para uma base nova */
+    montar(filtro, rotulosMes) {
+      this.construir();
+      if (window.PORTAL_SHELL) PORTAL_SHELL.filtros; /* torna a faixa visível */
+      el("filtroCampos").innerHTML = filtro.definicoes
+        .map(
+          (f) => `
+        <div class="ms" data-chave="${esc(f.chave)}">
+          <button class="ms-toggle" type="button" aria-expanded="false">
+            <span class="ms-label">${esc(f.titulo)}</span>
+            <span class="ms-value" data-resumo="${esc(f.chave)}"></span>
+            ${ICO("expand_more")}
+          </button>
+          <div class="ms-pop" hidden>
+            <div class="ms-actions">
+              <button type="button" data-acao="todos">Marcar todos</button>
+              <button type="button" data-acao="nenhum">Limpar</button>
+            </div>
+            ${f.opcoes.length > 8
+              ? '<div class="ms-search"><input type="search" placeholder="Buscar…" aria-label="Buscar opção"></div>'
+              : ""}
+            <div class="ms-list">
+              ${f.opcoes
+                .map(
+                  (o, i) => `
+                <label class="ms-item" title="${esc(o)}">
+                  <input type="checkbox" data-chave="${esc(f.chave)}" value="${i}" checked>
+                  <span>${esc(o)}</span>
+                </label>`
+                )
+                .join("")}
+            </div>
+            <p class="ms-vazio" hidden>Nada encontrado.</p>
+          </div>
+        </div>`
+        )
+        .join("");
+
+      this._rotulosMes = rotulosMes;
+      const opcoes = rotulosMes.map((m, i) => `<option value="${i}">${esc(m)}</option>`).join("");
+      el("mesDe").innerHTML = opcoes;
+      el("mesAte").innerHTML = opcoes;
+      this.atualizar(filtro);
+    },
+
+    /* sincroniza checkboxes, selects, resumos e chips com o Model */
+    atualizar(filtro) {
+      el("mesDe").value = String(filtro.mesDe);
+      el("mesAte").value = String(filtro.mesAte);
+
+      document.querySelectorAll('#filtroCampos input[type="checkbox"][data-chave]').forEach((cb) => {
+        cb.checked = filtro.selecao[cb.dataset.chave].has(parseInt(cb.value, 10));
+      });
+
+      filtro.definicoes.forEach((f) => {
+        const alvo = document.querySelector(`[data-resumo="${f.chave}"]`);
+        if (alvo) alvo.textContent = filtro.resumo(f.chave);
+        const ms = document.querySelector(`.ms[data-chave="${f.chave}"]`);
+        if (ms) ms.classList.toggle("is-filled", filtro.filtrado(f.chave));
+      });
+
+      this.renderChips(filtro);
+    },
+
+    renderChips(filtro) {
+      const caixa = el("chips");
+      if (!caixa) return;
+      const rotulos = this._rotulosMes || [];
+      const chips = [];
+      const chip = (attr, titulo, texto) =>
+        `<button class="portal-chip info chip" type="button" ${attr} title="Remover filtro">
+           <b>${esc(titulo)}:</b> ${esc(texto)} <span class="material-symbols-outlined x">close</span>
+         </button>`;
+
+      if (!filtro.periodoCompleto()) {
+        const rotulo =
+          filtro.mesDe === filtro.mesAte
+            ? rotulos[filtro.mesDe]
+            : `${rotulos[filtro.mesDe]} – ${rotulos[filtro.mesAte]}`;
+        chips.push(chip('data-periodo="1"', "Período", rotulo));
+      }
+
+      filtro.definicoes.forEach((f) => {
+        if (!filtro.filtrado(f.chave)) return;
+        chips.push(chip(`data-chave="${esc(f.chave)}"`, f.titulo, filtro.resumo(f.chave)));
+      });
+
+      const limpar = el("limparTudo");
+      if (limpar) limpar.hidden = !chips.length;
+      caixa.innerHTML = chips.length
+        ? chips.join("")
+        : "";
+    },
+
+    /* handlers: marcar(chave, i, ok) · marcarVarios(chave, [i], ok) · periodo(de, ate, quem)
+                 limparFiltro(chave) · limparPeriodo() · limparTudo() · podeAbrir() */
+    ligar(h) {
+      this.construir();
+      const campos = el("filtroCampos");
+
+      campos.addEventListener("click", (ev) => {
+        const toggle = ev.target.closest(".ms-toggle");
+        if (toggle) {
+          const ms = toggle.closest(".ms");
+          const abrindo = !ms.classList.contains("is-open");
+          fecharPopovers();
+          ms.classList.toggle("is-open", abrindo);
+          toggle.setAttribute("aria-expanded", String(abrindo));
+          ms.querySelector(".ms-pop").hidden = !abrindo;
+          if (abrindo) {
+            ajustarPopover(ms);
+            const busca = ms.querySelector('input[type="search"]');
+            if (busca) busca.focus();
+          }
+          return;
+        }
+
+        const acao = ev.target.closest("[data-acao]");
+        if (acao) {
+          const ms = acao.closest(".ms");
+          /* "Marcar todos"/"Limpar" valem só para o que a busca está mostrando */
+          const indices = Array.from(ms.querySelectorAll('input[type="checkbox"]'))
+            .filter((cb) => !cb.closest(".ms-item").hidden)
+            .map((cb) => parseInt(cb.value, 10));
+          h.marcarVarios(ms.dataset.chave, indices, acao.dataset.acao === "todos");
+        }
+      });
+
+      campos.addEventListener("change", (ev) => {
+        const cb = ev.target;
+        if (!cb.matches('input[type="checkbox"][data-chave]')) return;
+        h.marcar(cb.dataset.chave, parseInt(cb.value, 10), cb.checked);
+      });
+
+      campos.addEventListener("input", (ev) => {
+        if (!ev.target.matches('input[type="search"]')) return;
+        const ms = ev.target.closest(".ms");
+        const termo = ev.target.value.trim().toLowerCase();
+        let visiveis = 0;
+        ms.querySelectorAll(".ms-item").forEach((item) => {
+          const bate = item.textContent.trim().toLowerCase().includes(termo);
+          item.hidden = !bate;
+          if (bate) visiveis++;
+        });
+        ms.querySelector(".ms-vazio").hidden = visiveis > 0;
+      });
+
+      document.addEventListener("click", (ev) => {
+        if (!ev.target.closest(".ms")) fecharPopovers();
+      });
+      document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") fecharPopovers();
+      });
+
+      ["mesDe", "mesAte"].forEach((id) =>
+        el(id).addEventListener("change", () =>
+          h.periodo(parseInt(el("mesDe").value, 10), parseInt(el("mesAte").value, 10), id === "mesDe" ? "de" : "ate")
+        )
+      );
+
+      /* recolhe/expande os campos (começam recolhidos no celular) */
+      const alternar = (abrir) => {
+        el("filtroCampos").hidden = !abrir;
+        el("filtroPeriodo").hidden = !abrir;
+        el("btnFiltros").setAttribute("aria-expanded", String(abrir));
+        if (!abrir) fecharPopovers();
+      };
+      if (window.matchMedia("(max-width: 640px)").matches) alternar(false);
+      el("btnFiltros").addEventListener("click", () => {
+        if (!h.podeAbrir()) return;
+        alternar(el("filtroCampos").hidden);
+      });
+
+      el("limparTudo").addEventListener("click", h.limparTudo);
+
+      el("chips").addEventListener("click", (ev) => {
+        const chip = ev.target.closest(".chip");
+        if (!chip) return;
+        if (chip.dataset.periodo) return h.limparPeriodo();
+        if (chip.dataset.chave) h.limparFiltro(chip.dataset.chave);
+      });
+    },
+  };
+})(window.App);
+
+/* ===== js/views/ReceitaView.js ===== */
+/* =========================================================================
+   views/ReceitaView.js — Página 1: Análise de Receita
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const G = App.views.GraficoView;
+  const { moeda, moedaCurta, inteiro, pct } = App.utils.formato;
+
+  const TPL_RECEITA_PCT = "<b>%{label}</b><br>Receita: R$ %{value:,.2f}<br>Participação: %{percent}<extra></extra>";
+
+  App.views.ReceitaView = {
+    render(r, D) {
+      const C = G.COR;
+      const ticket = r.qtdAprovada ? r.receita / r.qtdAprovada : 0;
+      const parque = r.pdvsFiltrados.length;
+
+      /* séries mensais (também alimentam os mini gráficos dos KPIs) */
+      const meses = [], qtds = [], aprovadas = [], receitas = [], tickets = [];
+      for (let m = r.mesDe; m <= r.mesAte; m++) {
+        meses.push(D.ano_mes_rotulo[m]);
+        qtds.push(r.qtdMes[m]);
+        aprovadas.push(r.qtdAprovMes[m]);
+        receitas.push(r.receitaMes[m]);
+        tickets.push(r.qtdAprovMes[m] ? r.receitaMes[m] / r.qtdAprovMes[m] : 0);
+      }
+
+      /* ------------------------------------------------ KPIs */
+      G.kpi("kpiReceita", moedaCurta(r.receita),
+        `${inteiro(r.qtdAprovada)} aprovadas · movimentação ${moedaCurta(r.movimentacao)}`);
+      /* o cartão de destaque é escuro nos dois temas: a linha usa o azul claro da paleta */
+      G.sparkline("kpiReceitaExtra", receitas, meses, moedaCurta, G.paleta[4] || C.primaria);
+      /* variação real: último mês do período contra o mês anterior */
+      const nm = receitas.length;
+      const varEl = document.getElementById("kpiReceitaVar");
+      if (varEl) {
+        if (nm >= 2 && receitas[nm - 2] > 0) {
+          const v = (receitas[nm - 1] / receitas[nm - 2] - 1) * 100;
+          varEl.innerHTML = `<span class="portal-chip ${v >= 0 ? "ok" : "bad"}" title="Receita de ${meses[nm - 1]} contra ${meses[nm - 2]}">` +
+            `<span class="material-symbols-outlined">${v >= 0 ? "trending_up" : "trending_down"}</span>` +
+            `${v >= 0 ? "+" : "−"}${pct(Math.abs(v))} · ${meses[nm - 1]} vs ${meses[nm - 2]}</span>`;
+        } else {
+          varEl.innerHTML = "";
+        }
+      }
+
+      G.kpi("kpiTransacoes", inteiro(r.qtd), r.qtd ? "aprovadas e não aprovadas no filtro" : "sem transações no filtro");
+      G.proporcao("kpiTransacoesExtra", r.qtd ? (r.qtdAprovada / r.qtd) * 100 : 0,
+        `${pct(r.qtd ? (r.qtdAprovada / r.qtd) * 100 : 0)} aprovadas`,
+        `${inteiro(r.qtd - r.qtdAprovada)} não aprovadas`);
+
+      G.kpi("kpiTicket", moeda(ticket), "por transação aprovada");
+      G.sparkline("kpiTicketExtra", tickets, meses, moeda, C.primaria);
+
+      G.kpi("kpiPdvComMovimento", inteiro(r.pdvsAtivos), `de ${inteiro(parque)} máquinas no parque filtrado`);
+      G.proporcao("kpiPdvComMovimentoExtra", parque ? (r.pdvsAtivos / parque) * 100 : 0,
+        `${pct(parque ? (r.pdvsAtivos / parque) * 100 : 0)} do parque`,
+        `${inteiro(parque - r.pdvsAtivos)} sem movimento`);
+
+      /* ------------------------------------------------ composição (roscas) */
+      const fTipo = G.fatias(r.receitaTipo, D.tipo);
+      G.desenhar("gReceitaTipoPct", G.rosca(fTipo.rotulos, fTipo.valores, fTipo.cores, TPL_RECEITA_PCT),
+        G.layoutRosca(moedaCurta(r.receita), "receita"));
+      G.legenda("lgReceitaTipoPct", fTipo.rotulos, fTipo.valores, fTipo.cores, moedaCurta);
+
+      const fBand = G.fatias(r.receitaBandeira, D.bandeira);
+      G.desenhar("gReceitaBandeiraPct", G.rosca(fBand.rotulos, fBand.valores, fBand.cores, TPL_RECEITA_PCT),
+        G.layoutRosca(`${fBand.rotulos.length}`, fBand.rotulos.length === 1 ? "bandeira" : "bandeiras"));
+      G.legenda("lgReceitaBandeiraPct", fBand.rotulos, fBand.valores, fBand.cores, moedaCurta);
+
+      /* ------------------------------------------------ receita por tipo */
+      const rTipo = G.ranking(r.receitaTipo, D.tipo, true);
+      G.desenhar(
+        "gReceitaTipo",
+        [{
+          type: "bar", x: rTipo.rotulos, y: rTipo.valores, marker: { color: C.primaria },
+          hovertemplate: "<b>%{x}</b><br>Receita: R$ %{y:,.2f}<extra></extra>",
+        }],
+        G.layoutBase({
+          yaxis: G.eixoValor({ tickprefix: "R$ " }),
+          xaxis: G.eixoCategoria({ tickangle: G.angulo(rTipo.rotulos) }),
+          bargap: 0.5,
+        })
+      );
+
+      /* ------------------------------------------------ QUANTIDADE por tipo */
+      const rQtdTipo = G.ranking(r.qtdTipo, D.tipo, false);
+      const info = new Map();
+      D.tipo.forEach((nome, i) =>
+        info.set(nome, {
+          movimentacao: r.movTipo[i],
+          aprovadas: r.qtdAprovTipo[i],
+          taxa: r.qtdTipo[i] ? (r.qtdAprovTipo[i] / r.qtdTipo[i]) * 100 : 0,
+        })
+      );
+      const totalQtd = rQtdTipo.valores.reduce((a, b) => a + b, 0) || 1;
+      G.desenhar(
+        "gMovimentacaoTipo",
+        [{
+          type: "bar", orientation: "h", x: rQtdTipo.valores, y: rQtdTipo.rotulos,
+          marker: { color: C.qtd },
+          customdata: rQtdTipo.rotulos.map((nome, i) => {
+            const a = info.get(nome);
+            return [pct((rQtdTipo.valores[i] / totalQtd) * 100), inteiro(a.aprovadas), pct(a.taxa), moeda(a.movimentacao)];
+          }),
+          hovertemplate:
+            "<b>%{y}</b><br>%{x:,.0f} transações (%{customdata[0]} do total)" +
+            "<br>Aprovadas: %{customdata[1]} (%{customdata[2]})" +
+            "<br>Movimentação: %{customdata[3]}<extra></extra>",
+        }],
+        G.layoutBase({
+          margin: { l: 118, r: 24, t: 10, b: 40 },
+          xaxis: G.eixoValor(),
+          yaxis: G.eixoCategoria(),
+          bargap: 0.45,
+        })
+      );
+
+      /* ------------------------------------------------ transações por mês (empilhado) */
+      const naoAprovadas = qtds.map((q, i) => q - aprovadas[i]);
+      G.desenhar(
+        "gTransacoesMes",
+        [
+          {
+            type: "bar", name: "Aprovadas", x: meses, y: aprovadas,
+            marker: { color: C.qtd, line: { color: C.card, width: 1.5 } },
+            hovertemplate: "<b>%{x}</b><br>Aprovadas: %{y:,.0f}<extra></extra>",
+          },
+          {
+            type: "bar", name: "Não aprovadas", x: meses, y: naoAprovadas,
+            marker: { color: C.neutra, line: { color: C.card, width: 1.5 } },
+            hovertemplate: "<b>%{x}</b><br>Não aprovadas: %{y:,.0f}<extra></extra>",
+          },
+        ],
+        G.layoutBase({
+          barmode: "stack",
+          showlegend: true,
+          legend: { orientation: "h", x: 0, y: 1.12, traceorder: "normal", font: { size: 12, family: G.FONTE, color: C.txt2 } },
+          margin: { l: 56, r: 16, t: 30, b: 40 },
+          yaxis: G.eixoValor(),
+          xaxis: G.eixoCategoria(),
+          bargap: 0.45,
+          hovermode: "x unified",
+        })
+      );
+
+      /* ------------------------------------------------ receita mensal */
+      G.desenhar(
+        "gReceitaMensal",
+        [{
+          type: "scatter", mode: "lines+markers", x: meses, y: receitas,
+          line: { color: C.primaria, width: 2.5, shape: "spline", smoothing: 0.6 },
+          marker: { size: 8, color: C.card, line: { color: C.primaria, width: 2.5 } },
+          fill: "tozeroy",
+          fillcolor: G.alfa(C.primaria, 0.12),
+          hovertemplate: "<b>%{x}</b><br>Receita: R$ %{y:,.2f}<extra></extra>",
+        }],
+        G.layoutBase({
+          yaxis: G.eixoValor({ tickprefix: "R$ " }),
+          xaxis: G.eixoCategoria(),
+          hovermode: "x unified",
+        })
+      );
+    },
+  };
+})(window.App);
+
+/* ===== js/views/LocalidadeView.js ===== */
+/* =========================================================================
+   views/LocalidadeView.js — Página 2: Análise de PDV por Localidade
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const G = App.views.GraficoView;
+  const { esc } = App.utils.texto;
+  const { moeda, moedaCurta, inteiro, pct, decimal } = App.utils.formato;
+
+  const TPL_MAQ = "<b>%{label}</b><br>%{value:,.0f} máquinas<br>%{percent}<extra></extra>";
+
+  function miniRoscas(rMaq, D) {
+    const caixa = document.getElementById("miniRoscas");
+    if (!caixa) return;
+
+    const total = rMaq.valores.reduce((a, b) => a + b, 0);
+    const limpar = () => caixa.querySelectorAll(".mini-rosca-canvas").forEach((c) => G.apagar(c.id));
+
+    if (!total) {
+      limpar();
+      caixa.innerHTML = '<p class="empty-inline">Nenhuma máquina para os filtros selecionados.</p>';
+      caixa.dataset.assinatura = "";
+      return;
+    }
+
+    /* só refaz o HTML quando o conjunto de regiões muda */
+    const assinatura = rMaq.rotulos.join("|");
+    if (caixa.dataset.assinatura !== assinatura) {
+      limpar();
+      caixa.innerHTML = rMaq.rotulos
+        .map(
+          (nome, i) => `<div class="mini-rosca">
+             <div class="mini-rosca-canvas" id="miniRosca${i}"></div>
+             <p class="mini-rosca-nome" title="${esc(nome)}">${esc(nome)}</p>
+           </div>`
+        )
+        .join("");
+      caixa.dataset.assinatura = assinatura;
+    }
+
+    rMaq.rotulos.forEach((nome, i) => {
+      const valor = rMaq.valores[i];
+      const parte = (valor / total) * 100;
+      G.desenhar(
+        "miniRosca" + i,
+        [{
+          type: "pie", hole: 0.72, labels: [nome, "Outras regiões"], values: [valor, total - valor],
+          sort: false, textinfo: "none",
+          marker: { colors: [rMaq.cores[i], G.COR.fundo2], line: { width: 0 } },
+          hovertemplate: TPL_MAQ,
+        }],
+        G.layoutBase({
+          margin: { l: 4, r: 4, t: 4, b: 4 },
+          xaxis: undefined,
+          yaxis: undefined,
+          annotations: [{
+            text: `<b>${pct(parte)}</b><br><span style="font-size:9px;color:${G.COR.txt3}">${inteiro(valor)} máq.</span>`,
+            showarrow: false,
+            font: { family: G.FONTE, size: 13.5, color: G.COR.txt },
+            x: 0.5,
+            y: 0.5,
+          }],
+        })
+      );
+    });
+  }
+
+  App.views.LocalidadeView = {
+    /* chamado quando uma base nova entra: as mini-roscas são recriadas */
+    reiniciar() {
+      const mini = document.getElementById("miniRoscas");
+      if (mini) {
+        mini.dataset.assinatura = "";
+        mini.innerHTML = "";
+      }
+    },
+
+    render(r, D) {
+      const C = G.COR;
+      const parque = r.pdvsFiltrados.length;
+
+      G.kpi("kpiQtdPdv", inteiro(parque), `${inteiro(r.pdvsAtivos)} com movimento no período`);
+      G.proporcao("kpiQtdPdvExtra", parque ? (r.pdvsAtivos / parque) * 100 : 0,
+        `${inteiro(r.pdvsAtivos)} ativos`, `${inteiro(r.pdvsInativos)} inativos`);
+      G.kpi("kpiQtdIgrejas", inteiro(r.qtdIgrejas),
+        r.qtdIgrejas ? `média de ${decimal(parque / r.qtdIgrejas)} máquinas por igreja` : "nenhuma igreja no filtro");
+      G.kpi("kpiPdvsAtivos", inteiro(r.pdvsAtivos),
+        parque ? `${pct((r.pdvsAtivos / parque) * 100)} do parque filtrado` : "sem máquinas no filtro");
+      /* tendência: máquinas com movimento em cada mês do período */
+      const mesesK = [], ativasK = [];
+      for (let m = r.mesDe; m <= r.mesAte; m++) {
+        mesesK.push(D.ano_mes_rotulo[m]);
+        ativasK.push(r.pdvMesAtivo[m].size);
+      }
+      G.sparkline("kpiPdvsAtivosExtra", ativasK, mesesK, (v) => `${inteiro(v)} máquinas`, C.primaria);
+      G.kpi("kpiReceitaPorMaquina", moedaCurta(r.pdvsAtivos ? r.receita / r.pdvsAtivos : 0),
+        "receita média por máquina ativa");
+
+      /* ativos × inativos */
+      const rotAtivo = ["Ativos", "Inativos"];
+      const valAtivo = [r.pdvsAtivos, r.pdvsInativos];
+      const corAtivo = [C.primaria, C.neutra];
+      G.desenhar("gPdvAtivoInativo", G.rosca(rotAtivo, valAtivo, corAtivo, TPL_MAQ),
+        G.layoutRosca(parque ? pct((r.pdvsAtivos / parque) * 100) : "—", "ativos"));
+      G.legenda("lgPdvAtivoInativo", rotAtivo, valAtivo, corAtivo, inteiro);
+
+      /* máquinas por região */
+      const rMaq = G.fatias(r.maquinasRegiao, D.regiao);
+      G.desenhar("gMaquinasRegiao", G.rosca(rMaq.rotulos, rMaq.valores, rMaq.cores, TPL_MAQ),
+        G.layoutRosca(inteiro(parque), "máquinas"));
+      G.legenda("lgMaquinasRegiao", rMaq.rotulos, rMaq.valores, rMaq.cores, inteiro);
+
+      /* receita por região */
+      const rRec = G.ranking(r.receitaRegiao, D.regiao, true);
+      G.desenhar(
+        "gReceitaRegiao",
+        [{
+          type: "bar", x: rRec.rotulos, y: rRec.valores,
+          /* "Sem localidade" em âmbar: é pendência de cadastro, não uma região */
+          marker: { color: rRec.rotulos.map((n) => (n === App.Config.regras.semLocalidade ? C.alerta : C.primaria)) },
+          hovertemplate: "<b>%{x}</b><br>Receita: R$ %{y:,.2f}<extra></extra>",
+        }],
+        G.layoutBase({
+          yaxis: G.eixoValor({ tickprefix: "R$ " }),
+          xaxis: G.eixoCategoria({ tickangle: G.angulo(rRec.rotulos) }),
+          bargap: 0.4,
+        })
+      );
+
+      /* transações por região */
+      const rQtd = G.ranking(r.qtdRegiao, D.regiao, false);
+      G.desenhar(
+        "gTransacoesRegiao",
+        [{
+          type: "bar", orientation: "h", x: rQtd.valores, y: rQtd.rotulos,
+          marker: { color: rQtd.rotulos.map((n) => (n === App.Config.regras.semLocalidade ? C.alerta : C.qtd)) },
+          hovertemplate: "<b>%{y}</b><br>%{x:,.0f} transações<extra></extra>",
+        }],
+        G.layoutBase({ margin: { l: 140, r: 24, t: 10, b: 40 }, xaxis: G.eixoValor(), yaxis: G.eixoCategoria(), bargap: 0.4 })
+      );
+
+      /* receita por descrição de igreja, com máquinas e ticket no tooltip */
+      const rDesc = G.ranking(r.receitaDesc, D.desc_igreja, false);
+      const info = new Map();
+      D.desc_igreja.forEach((nome, i) =>
+        info.set(nome, {
+          maquinas: r.maquinasDesc[i],
+          transacoes: r.qtdDesc[i],
+          porMaquina: r.maquinasDesc[i] ? r.receitaDesc[i] / r.maquinasDesc[i] : 0,
+        })
+      );
+      G.desenhar(
+        "gReceitaDescIgreja",
+        [{
+          type: "bar", orientation: "h", x: rDesc.valores, y: rDesc.rotulos, marker: { color: C.primaria },
+          customdata: rDesc.rotulos.map((n) => {
+            const a = info.get(n);
+            return [inteiro(a.maquinas), inteiro(a.transacoes), moeda(a.porMaquina)];
+          }),
+          hovertemplate:
+            "<b>%{y}</b><br>Receita: R$ %{x:,.2f}<br>Máquinas: %{customdata[0]}" +
+            "<br>Transações: %{customdata[1]}<br>Receita por máquina: %{customdata[2]}<extra></extra>",
+        }],
+        G.layoutBase({
+          margin: { l: 140, r: 28, t: 10, b: 40 },
+          xaxis: G.eixoValor({ tickprefix: "R$ " }),
+          yaxis: G.eixoCategoria(),
+          bargap: 0.42,
+        })
+      );
+
+      /* máquinas por descrição de igreja */
+      const fDesc = G.fatias(r.maquinasDesc, D.desc_igreja);
+      G.desenhar("gMaquinasDescIgreja", G.rosca(fDesc.rotulos, fDesc.valores, fDesc.cores, TPL_MAQ),
+        G.layoutRosca(inteiro(parque), "máquinas"));
+      G.legenda("lgMaquinasDescIgreja", fDesc.rotulos, fDesc.valores, fDesc.cores, inteiro);
+
+      /* mini roscas: todas as regiões (sem agrupar em "Outros"), mesma cor da rosca acima */
+      const rTodas = G.ranking(r.maquinasRegiao, D.regiao, true);
+      rTodas.cores = rTodas.rotulos.map((n) => {
+        const i = rMaq.rotulos.indexOf(n);
+        return i >= 0 ? rMaq.cores[i] : G.COR.neutra;
+      });
+      miniRoscas(rTodas, D);
+
+      /* utilização mensal: UMA medida (% do parque); a quantidade vai no tooltip */
+      const meses = [], ativas = [], utilizacao = [];
+      const base = parque || 1;
+      for (let m = r.mesDe; m <= r.mesAte; m++) {
+        meses.push(D.ano_mes_rotulo[m]);
+        const n = r.pdvMesAtivo[m].size;
+        ativas.push(n);
+        utilizacao.push((n / base) * 100);
+      }
+
+      G.desenhar(
+        "gUtilizacaoMensal",
+        [{
+          type: "bar", name: "Utilização do parque", x: meses, y: utilizacao,
+          marker: { color: C.primaria },
+          customdata: ativas.map((n) => [inteiro(n), inteiro(parque)]),
+          hovertemplate:
+            "<b>%{x}</b><br>Utilização: %{y:.1f}% do parque" +
+            "<br>%{customdata[0]} de %{customdata[1]} máquinas com movimento<extra></extra>",
+        }],
+        G.layoutBase({
+          margin: { l: 56, r: 16, t: 10, b: 42 },
+          yaxis: G.eixoValor({ range: [0, 105], dtick: 25, ticksuffix: "%" }),
+          xaxis: G.eixoCategoria(),
+          bargap: 0.55,
+        })
+      );
+    },
+  };
+})(window.App);
+
+/* ===== js/views/EstadoView.js ===== */
+/* =========================================================================
+   views/EstadoView.js — Página 3: Consulta por Estado (gráfico + tabela dinâmica)
+
+   Recebe a consulta pronta do PainelModel (linhas já ordenadas e filtradas
+   pela busca, municípios dos estados abertos, totais) e só desenha. Cliques e
+   digitação viram chamadas aos handlers que o Controller registra em `ligar()`.
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const G = App.views.GraficoView;
+  const { esc } = App.utils.texto;
+  const { moeda, moedaCurta, inteiro, pct, decimal } = App.utils.formato;
+  const UF = App.utils.uf;
+
+  const el = (id) => document.getElementById(id);
+  const CHEV = '<span class="material-symbols-outlined">chevron_right</span>';
+
+  function barra(parte) {
+    const largura = Math.max(0, Math.min(100, parte));
+    return `<div class="barra-celula"><span class="portal-progress"><i style="width:${largura.toFixed(1)}%"></i></span>` +
+      `<em>${esc(pct(parte))}</em></div>`;
+  }
+
+  function celulas(l, parte, titulo) {
+    return `
+      <td class="num">${esc(inteiro(l.pdvs))}</td>
+      <td class="num">${esc(inteiro(l.igrejas))}</td>
+      <td class="num">${esc(inteiro(l.transacoes))}</td>
+      <td class="num receita">${esc(moeda(l.receita))}</td>
+      <td class="num">${esc(moeda(l.ticket))}</td>
+      <td${titulo ? ` title="${titulo}"` : ""}>${barra(parte)}</td>`;
+  }
+
+  /* "SP" vira selo + nome por extenso; outro texto aparece como veio */
+  function nomeEstado(nome) {
+    const extenso = UF.nome(nome);
+    return extenso
+      ? `<span class="uf">${esc(String(nome).toUpperCase())}</span><span>${esc(extenso)}</span>`
+      : `<span>${esc(nome)}</span>`;
+  }
+
+  function linhaEstado(item, totalReceita, semLocalidade) {
+    const l = item.linha;
+    const html = [`
+      <tr class="linha-estado${item.aberto ? " is-active" : ""}${semLocalidade ? " linha-sem-localidade" : ""}"
+          data-estado="${l.idx}" tabindex="0" role="button" aria-expanded="${item.aberto}">
+        <td class="nome">
+          <div class="celula-estado">
+            <span class="abrir" aria-hidden="true">${CHEV}</span>
+            ${semLocalidade ? `<span>${esc(l.nome)}</span><span class="portal-chip warn">sem cadastro</span>` : nomeEstado(l.nome)}
+          </div>
+        </td>
+        ${celulas(l, (l.receita / (totalReceita || 1)) * 100)}
+      </tr>`];
+
+    if (!item.aberto) return html.join("");
+    if (!item.filhos.length) {
+      html.push('<tr class="linha-municipio"><td class="nome">Sem municípios no filtro</td><td colspan="6"></td></tr>');
+      return html.join("");
+    }
+    item.filhos.forEach((f) =>
+      html.push(`
+        <tr class="linha-municipio">
+          <td class="nome">${esc(f.nome)}</td>
+          ${celulas(f, (f.receita / (l.receita || 1)) * 100, "participação dentro do estado")}
+        </tr>`)
+    );
+    return html.join("");
+  }
+
+  App.views.EstadoView = {
+    /* handlers: { ordenar(coluna), alternar(idxEstado), alternarTodos(), buscar(texto) } */
+    ligar(handlers) {
+      el("tabelaEstados").querySelectorAll("th[data-ordenar]").forEach((th) => {
+        th.addEventListener("click", () => handlers.ordenar(th.dataset.ordenar));
+      });
+      const corpo = el("tabelaEstadosCorpo");
+      corpo.addEventListener("click", (ev) => {
+        const linha = ev.target.closest(".linha-estado");
+        if (linha) handlers.alternar(parseInt(linha.dataset.estado, 10));
+      });
+      corpo.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
+        const linha = ev.target.closest(".linha-estado");
+        if (!linha) return;
+        ev.preventDefault();
+        handlers.alternar(parseInt(linha.dataset.estado, 10));
+      });
+      el("btnAbrirTodos").addEventListener("click", handlers.alternarTodos);
+      let espera = null;
+      el("buscaEstados").addEventListener("input", (ev) => {
+        clearTimeout(espera);
+        espera = setTimeout(() => handlers.buscar(ev.target.value.trim()), 160);
+      });
+    },
+
+    /* base nova: a busca volta vazia */
+    reiniciar() {
+      el("buscaEstados").value = "";
+    },
+
+    render(c) {
+      const C = G.COR;
+      const t = c.totais;
+
+      G.kpi("kpiEstados", inteiro(c.qtdEstados),
+        c.temSemLocal
+          ? `${inteiro(t.pdvs)} PDVs · ${inteiro(c.semLocalPdvs)} sem localidade`
+          : `${inteiro(t.pdvs)} PDVs no filtro`);
+      G.kpi("kpiMunicipios", inteiro(c.municipios),
+        c.qtdEstados ? `média de ${decimal(c.municipios / c.qtdEstados)} por estado` : "—");
+      G.kpi("kpiEstadoLider", c.lider ? (UF.nome(c.lider.nome) || c.lider.nome) : "—",
+        c.lider ? `${moedaCurta(c.lider.receita)} · ${pct((c.lider.receita / (t.receita || 1)) * 100)} da receita` : "—");
+      G.kpi("kpiReceitaMediaEstado", moedaCurta(c.qtdComReceita ? t.receita / c.qtdComReceita : 0),
+        `entre ${inteiro(c.qtdComReceita)} estado(s) com receita`);
+
+      /* só estados reais e uma medida só: transações, PDVs e ticket no tooltip */
+      const nomes = c.porReceita.map((l) => l.nome);
+      G.desenhar(
+        "gEstados",
+        [{
+          type: "bar",
+          name: "Receita",
+          x: nomes,
+          y: c.porReceita.map((l) => l.receita),
+          marker: { color: C.primaria },
+          customdata: c.porReceita.map((l) => [
+            UF.nome(l.nome) || l.nome, inteiro(l.transacoes), inteiro(l.pdvs), moeda(l.ticket),
+            pct((l.receita / (t.receita || 1)) * 100),
+          ]),
+          hovertemplate:
+            "<b>%{customdata[0]}</b><br>Receita: R$ %{y:,.2f} (%{customdata[4]})" +
+            "<br>Transações: %{customdata[1]}<br>PDVs: %{customdata[2]}<br>Ticket médio: %{customdata[3]}<extra></extra>",
+        }],
+        G.layoutBase({
+          margin: { l: 64, r: 16, t: 10, b: 44 },
+          yaxis: G.eixoValor({ tickprefix: "R$ " }),
+          xaxis: G.eixoCategoria({ tickangle: G.angulo(nomes) }),
+          bargap: 0.45,
+        })
+      );
+
+      this.renderTabela(c);
+    },
+
+    renderTabela(c) {
+      const corpo = el("tabelaEstadosCorpo");
+      const rodape = el("tabelaEstadosRodape");
+      if (!corpo) return;
+
+      const abertos = c.linhas.concat(c.semLocal || []).filter((i) => i.aberto).length;
+      const total = c.linhas.length + (c.semLocal ? 1 : 0);
+      el("btnAbrirTodosTexto").textContent = total && abertos === total ? "Fechar todos" : "Abrir todos";
+      el("btnAbrirTodos").disabled = !!c.busca;
+
+      const t = c.totais;
+      if (!c.linhas.length && !c.semLocal) {
+        corpo.innerHTML = `<tr><td colspan="7" class="empty-inline">${
+          c.busca ? `Nada encontrado para “${esc(c.busca)}”.` : "Nenhum estado no filtro."
+        }</td></tr>`;
+      } else {
+        const html = c.linhas.map((item) => linhaEstado(item, t.receita, false));
+        if (c.semLocal) html.push(linhaEstado(c.semLocal, t.receita, true));
+        corpo.innerHTML = html.join("");
+      }
+
+      rodape.innerHTML = c.qtdEstados || c.temSemLocal
+        ? `<tr>
+            <td class="nome">Total (${esc(inteiro(c.qtdEstados))} estados${c.temSemLocal ? " + sem localidade" : ""})</td>
+            <td class="num">${esc(inteiro(t.pdvs))}</td>
+            <td class="num">${esc(inteiro(t.igrejas))}</td>
+            <td class="num">${esc(inteiro(t.transacoes))}</td>
+            <td class="num receita">${esc(moeda(t.receita))}</td>
+            <td class="num">${esc(moeda(t.ticket))}</td>
+            <td>${barra(100)}</td>
+          </tr>`
+        : "";
+
+      /* indicador de ordenação no cabeçalho */
+      document.querySelectorAll("#tabelaEstados th[data-ordenar]").forEach((th) => {
+        if (th.dataset.ordenar === c.tabela.coluna) {
+          th.setAttribute("aria-sort", c.tabela.desc ? "descending" : "ascending");
+          const seta = th.querySelector(".seta");
+          if (seta) seta.textContent = c.tabela.desc ? "▼" : "▲";
+        } else {
+          th.removeAttribute("aria-sort");
+        }
+      });
+    },
+  };
+})(window.App);
+
+</script>

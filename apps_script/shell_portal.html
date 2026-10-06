@@ -1,0 +1,415 @@
+<!-- ======================================================================
+  SHELL do portal v2 — HTML, CSS e JavaScript PUROS (sem Tailwind e sem frameworks).
+  Layout da base Stitch aprovada: menu lateral azul-marinho, barra superior, faixa de filtros fixa,
+  abas de página, cartões, KPIs, tabelas. Tema claro/escuro por variáveis CSS.
+
+  USO (no <head> de cada dashboard): inclua este arquivo com a diretiva include('shell_portal').
+  No <body>, deixe só o conteúdo dentro de:
+      <div id="portal-conteudo" hidden>
+         <section data-pagina="visao"><div class="portal-page"> ... </div></section>
+         <section data-pagina="entradas"><div class="portal-page"> ... </div></section>
+      </div>
+  (sempre um <div> interno para o layout; nunca "display" direto na <section>, senão o atributo hidden não funciona)
+  e inicie:
+      PORTAL_SHELL.init({ chave:'fluxo', titulo:'Fluxo de Caixa',
+        dashboards: (lista injetada pelo servidor), inicial:'visao', onNavegar:id=>{},
+        paginas:[{id:'visao', rotulo:'Visão Geral', icone:'query_stats'}, ...],      // vira a barra de abas
+        busca:{placeholder:'Buscar...', aoDigitar:txt=>{}},                             // opcional
+        exportar:[{rotulo:'Exportar CSV', icone:'table_chart', fn:()=>{}}],             // opcional
+        atualizar:()=>Promise,                                                           // botão "Atualizar dados"
+        selo:'Mensagem curta ao lado das abas' });                                       // opcional
+  API: PORTAL_SHELL.setStatus({fonte, dados, erro}) · .setSelo(texto) · .irPara(id) · .ativa() · .toast(texto) · .cor(nome) · .escuro()
+       .filtros  -> elemento da faixa de filtros fixa sob a barra superior (a página o preenche)
+  Evento ao trocar de tema:  document.addEventListener('portal:tema', e => redesenhar(e.detail.escuro))
+
+  COMPONENTES (classes):
+    layout   .portal-page (coluna com espaçamento) · .g (grade) + .c3 .c4 .c5 .c6 .c7 .c8 .c12 · .row .col .wrap .gap-1..4 .grow .between .center .end
+    cartões  .portal-card · .portal-kpi (.hero = destaque escuro) com .rotulo .valor .sub · .portal-panel (título .t, subtítulo .s)
+    peças    .portal-chip (.ok .warn .bad .info .neutro) · .portal-btn (.primario) · .portal-seg > button[aria-pressed] · .portal-sel · .portal-input
+             .portal-callout (.warn .info .bad) · .portal-progress > i · .portal-legenda · .portal-pagehead (h1, p, .selos)
+    tabelas  .portal-tablewrap > table.portal-table (thead, tbody, tfoot; .num = números à direita; .c = centralizado)
+    texto    .num (algarismos tabulares) · .muted · .pos (verde) · .neg (vermelho) · .nowrap
+====================================================================== -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<?!= include('portal_logo') ?>
+<style>
+:root{
+  --background:#F8F9FF; --surface:#F8F9FF; --lowest:#FFFFFF; --low:#EFF4FF; --container:#E6EEFF; --high:#DDE9FF; --highest:#D3E3FF;
+  --on-surface:#0B1C30; --on-variant:#434654; --outline:#737685; --outline-variant:#C3C6D6;
+  --primary:#003594; --primary-container:#004AC6; --on-primary:#FFFFFF; --secondary:#0051D5; --secondary-container:#316BF3;
+  --fixed:#DBE1FF; --on-fixed:#00174B; --inverse:#213146; --on-inverse:#EBF1FF;
+  --ok:#059669; --ok-bg:#D1FAE5; --warn:#B45309; --warn-bg:#FEF3C7; --bad:#BE123C; --bad-bg:#FFE4E6; --info:#0051D5; --info-bg:#DBE1FF;
+  --sombra:0 1px 3px rgba(15,23,42,.07),0 1px 2px rgba(15,23,42,.05);
+  --graf-1:#0051D5; --graf-2:#003594; --graf-3:#316BF3; --graf-4:#60A5FA; --graf-5:#93C5FD; --graf-6:#0EA5E9; --graf-7:#6366F1; --graf-8:#94A3B8;
+  --graf-pos:#059669; --graf-neg:#E11D48; --graf-grade:#E2E8F0; --graf-texto:#64748B;
+  --graf-tt-bg:rgba(11,28,48,.94); --graf-tt-titulo:#FFFFFF; --graf-tt-texto:#DBE4F5;
+}
+html.dark{
+  --background:#0B1220; --surface:#0B1220; --lowest:#111A2E; --low:#18233A; --container:#1B2744; --high:#22304F; --highest:#2A3A5A;
+  --on-surface:#E5EDF9; --on-variant:#9FB1D1; --outline:#7A8AA5; --outline-variant:#2A3A5A;
+  --primary:#7AA2FF; --primary-container:#2563EB; --on-primary:#0B1220; --secondary:#7AA2FF; --secondary-container:#316BF3;
+  --fixed:#1E2F5C; --on-fixed:#DBE1FF; --inverse:#090F1C; --on-inverse:#E5EDF9;
+  --ok:#34D399; --ok-bg:#064E3B; --warn:#FBBF24; --warn-bg:#3A2A06; --bad:#FB7185; --bad-bg:#4C0519; --info:#7AA2FF; --info-bg:#1E2F5C;
+  --sombra:0 1px 3px rgba(0,0,0,.4);
+  --graf-1:#4F7DF0; --graf-2:#7AA2FF; --graf-3:#316BF3; --graf-4:#93C5FD; --graf-5:#BFDBFE; --graf-6:#38BDF8; --graf-7:#A5B4FC; --graf-8:#94A3B8;
+  --graf-pos:#34D399; --graf-neg:#FB7185; --graf-grade:#22304D; --graf-texto:#9FB0C8;
+  --graf-tt-bg:rgba(2,6,18,.96); --graf-tt-titulo:#FFFFFF; --graf-tt-texto:#C9D4F5;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--background);color:var(--on-surface);font:14px/20px Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+a{color:inherit}
+h1,h2,h3,p{margin:0}
+::-webkit-scrollbar{width:8px;height:8px} ::-webkit-scrollbar-thumb{background:var(--outline-variant);border-radius:8px}
+.material-symbols-outlined{font-family:'Material Symbols Outlined';font-weight:400;font-style:normal;font-size:20px;line-height:1;letter-spacing:normal;text-transform:none;display:inline-block;white-space:nowrap;direction:ltr;font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24;-webkit-font-feature-settings:'liga';font-feature-settings:'liga'}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--on-variant)} .pos{color:var(--ok)} .neg{color:var(--bad)} .nowrap{white-space:nowrap}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@keyframes portal-gira{to{transform:rotate(360deg)}} .portal-gira{animation:portal-gira .9s linear infinite}
+@keyframes portal-pulso{50%{opacity:.35}} .portal-pulso{animation:portal-pulso 1.6s ease-in-out infinite}
+
+/* ---------- utilitários de layout ---------- */
+.row{display:flex;align-items:center} .col{display:flex;flex-direction:column} .wrap{flex-wrap:wrap} .grow{flex:1;min-width:0}
+.between{justify-content:space-between} .center{justify-content:center} .end{justify-content:flex-end} .top{align-items:flex-start}
+.gap-1{gap:4px} .gap-2{gap:8px} .gap-3{gap:12px} .gap-4{gap:16px} .gap-6{gap:24px}
+.g{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:24px}
+.g.gap-4{gap:16px}
+.c3{grid-column:span 3} .c4{grid-column:span 4} .c5{grid-column:span 5} .c6{grid-column:span 6} .c7{grid-column:span 7} .c8{grid-column:span 8} .c12{grid-column:span 12}
+@media (max-width:1180px){.c3,.c4,.c5,.c6{grid-column:span 6} .c7,.c8{grid-column:span 12}}
+@media (max-width:760px){.g>*{grid-column:span 12!important}}
+.portal-page{display:flex;flex-direction:column;gap:24px;width:100%;min-width:0}
+
+/* ---------- menu lateral ---------- */
+#menu{position:fixed;left:0;top:0;height:100vh;width:260px;z-index:50;display:flex;flex-direction:column;justify-content:space-between;padding:16px;color:#fff;
+  background:linear-gradient(180deg,#0F172A 0%,#1D3A80 100%);box-shadow:0 8px 28px rgba(0,0,0,.25);transition:transform .2s}
+#menu .topo{display:flex;flex-direction:column;gap:16px;min-height:0;overflow-y:auto}
+#menu .marca{display:flex;align-items:center;gap:12px;padding:8px;border-radius:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15)}
+#menu .selo{background:#fff;border-radius:12px;padding:6px;display:flex;flex:none;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+#menu .selo .logo-portal{width:36px;height:36px}
+#menu .marca b{display:block;font-size:14px;font-weight:600;color:#fff} #menu .marca small{display:block;font-size:11px;color:rgba(191,219,254,.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#menu .inicio{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 12px;border-radius:8px;background:#2563EB;color:#fff;font-size:12px;font-weight:600;text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,.25);transition:background .15s}
+#menu .inicio:hover{background:#1D4ED8}
+#menu nav{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+#menu nav .tit{padding:8px 12px 4px;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.45)}
+#menu nav a{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;font-size:13px;color:rgba(255,255,255,.8);text-decoration:none;transition:background .15s,color .15s}
+#menu nav a:hover{background:rgba(255,255,255,.1);color:#fff}
+#menu nav a[aria-current="page"]{background:rgba(255,255,255,.15);color:#fff;font-weight:600;box-shadow:inset 0 1px 3px rgba(0,0,0,.2);border-left:4px solid #316BF3;padding-left:8px}
+#menu .status{display:flex;flex-direction:column;gap:10px;padding:14px;margin-top:12px;border-radius:12px;font-size:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15)}
+#menu .status .l1{display:flex;align-items:center;gap:8px;font-weight:600;color:#fff}
+#menu .status .l2{display:flex;flex-direction:column;gap:2px;font-size:11px;color:rgba(255,255,255,.7)}
+#menu .ponto{width:8px;height:8px;border-radius:50%;background:#94A3B8;flex:none}
+#menu .status button{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.1);transition:background .15s}
+#menu .status button:hover{background:rgba(255,255,255,.2)} #menu .status button:disabled{opacity:.6;cursor:default}
+#menu .status .material-symbols-outlined{font-size:16px}
+#menu .fechar{display:none;margin-left:auto;color:rgba(255,255,255,.7)}
+#fundo-menu{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:40;display:none}
+
+/* ---------- corpo, barra superior, filtros ---------- */
+#portal-corpo{margin-left:260px;min-height:100vh}
+#cabeca{position:sticky;top:0;z-index:30;box-shadow:0 1px 8px rgba(11,28,48,.06)}
+#topo{height:64px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 32px;background:color-mix(in srgb,var(--lowest) 92%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid color-mix(in srgb,var(--outline-variant) 45%,transparent)}
+#topo .esq{display:flex;align-items:center;gap:12px;min-width:0}
+#topo .dir{display:flex;align-items:center;gap:12px}
+#topo .crumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--on-variant);white-space:nowrap;overflow:hidden}
+#topo .crumb a{text-decoration:none} #topo .crumb a:hover{color:var(--on-surface)}
+#topo .crumb .atual{color:var(--primary);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+#topo .crumb .material-symbols-outlined{font-size:16px;color:var(--outline)}
+#topo .logo-mini{display:flex;background:#fff;border-radius:8px;padding:4px;box-shadow:var(--sombra)} #topo .logo-mini .logo-portal{width:28px;height:28px}
+#btn-menu{display:none;width:36px;height:36px;border-radius:8px;align-items:center;justify-content:center;background:var(--low);color:var(--on-variant)}
+.caixa-busca{position:relative;display:flex;align-items:center}
+.caixa-busca .material-symbols-outlined{position:absolute;left:12px;font-size:18px;color:var(--outline);pointer-events:none}
+.caixa-busca input{height:36px;width:240px;padding:0 34px 0 38px;border-radius:8px;border:1px solid var(--outline-variant);background:var(--lowest);font-size:12px;outline:none}
+.caixa-busca input:focus{border-color:var(--secondary);box-shadow:0 0 0 3px color-mix(in srgb,var(--secondary) 20%,transparent)}
+.caixa-busca kbd{position:absolute;right:10px;padding:1px 6px;font-size:10px;border-radius:4px;background:var(--container);color:var(--on-variant);border:1px solid color-mix(in srgb,var(--outline-variant) 60%,transparent);font-family:inherit}
+.btn-icone,.btn-topo{height:36px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:8px;border:1px solid var(--outline-variant);background:var(--lowest);color:var(--on-surface);transition:background .15s}
+.btn-icone{width:36px} .btn-topo{padding:0 12px;font-size:13px;font-weight:600}
+.btn-icone:hover,.btn-topo:hover{background:var(--low)}
+.menu-exp{position:relative}
+#menu-exp{display:none;position:absolute;right:0;top:calc(100% + 4px);width:200px;padding:4px 0;border-radius:8px;background:var(--lowest);border:1px solid var(--outline-variant);box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:60}
+#menu-exp.aberto{display:block}
+#menu-exp button{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;font-size:12px;text-align:left}
+#menu-exp button:hover{background:var(--low)} #menu-exp .material-symbols-outlined{font-size:18px;color:var(--primary)}
+.usuario{display:flex;align-items:center;gap:10px;padding-left:12px;border-left:1px solid color-mix(in srgb,var(--outline-variant) 60%,transparent)}
+.usuario .chip{display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:999px;font-size:12px;background:var(--low);border:1px solid color-mix(in srgb,var(--outline-variant) 40%,transparent)}
+.usuario .chip i{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.usuario .chip span{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.usuario .avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--primary);color:var(--on-primary)}
+.usuario .avatar .material-symbols-outlined{font-size:18px}
+#filtros-faixa{display:none;padding:8px 32px;background:color-mix(in srgb,var(--lowest) 95%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid color-mix(in srgb,var(--outline-variant) 35%,transparent)}
+#filtros-faixa.visivel{display:block}
+#filtros{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+#filtros .rot{display:flex;align-items:center;gap:4px;margin-right:4px;font-size:11px;font-weight:600;color:var(--on-variant)} #filtros .rot .material-symbols-outlined{font-size:16px}
+#conteudo{padding:32px;min-height:calc(100vh - 64px)}
+#portal-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:70;display:none;padding:8px 16px;border-radius:8px;font-size:12px;background:var(--inverse);color:var(--on-inverse);box-shadow:0 6px 20px rgba(0,0,0,.3)}
+
+/* ---------- componentes ---------- */
+.portal-tabs{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.portal-tabs .abas{display:flex;gap:6px;padding:4px;border-radius:12px;background:var(--container);box-shadow:inset 0 1px 3px rgba(0,0,0,.08);overflow-x:auto;max-width:100%}
+.portal-tab{display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;color:var(--on-variant);white-space:nowrap;transition:background .15s,color .15s}
+.portal-tab:hover{background:var(--high);color:var(--on-surface)}
+.portal-tab[aria-selected="true"]{background:var(--primary);color:var(--on-primary);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.portal-tab .material-symbols-outlined{font-size:18px}
+.portal-card,.portal-panel{background:var(--lowest);border-radius:12px;box-shadow:var(--sombra)}
+.portal-panel{padding:24px;display:flex;flex-direction:column;gap:20px;min-width:0}
+.portal-panel .t{font-size:18px;line-height:24px;font-weight:600} .portal-panel .s{font-size:12px;line-height:16px;color:var(--on-variant);margin-top:2px}
+.portal-panel .cab{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.portal-kpi{background:var(--lowest);border-radius:12px;padding:20px;box-shadow:var(--sombra);display:flex;flex-direction:column;justify-content:space-between;gap:12px;position:relative;overflow:hidden;min-width:0}
+.portal-kpi .topo-k{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.portal-kpi .rotulo{font-size:11px;line-height:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--on-variant)}
+.portal-kpi .valor{font-size:28px;line-height:36px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.portal-kpi .sub{font-size:12px;line-height:16px;color:var(--on-variant)}
+.portal-kpi.hero{background:var(--inverse);color:#fff}
+.portal-kpi.hero .rotulo,.portal-kpi.hero .sub{color:rgba(219,225,255,.8)} .portal-kpi.hero .valor{color:#fff}
+.portal-kpi svg.spark{width:100%;height:44px;display:block}
+/* destaque e animação dos cards de KPI (todos os dashboards) */
+.portal-kpi{border:1px solid color-mix(in srgb,var(--outline-variant) 55%,transparent);cursor:default;transition:transform .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s,border-color .28s}
+.portal-kpi::before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:linear-gradient(90deg,var(--primary),var(--secondary));transform:scaleX(.28);transform-origin:left;transition:transform .45s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.portal-kpi::after{content:"";position:absolute;right:-36px;top:-36px;width:120px;height:120px;border-radius:50%;background:color-mix(in srgb,var(--secondary) 9%,transparent);transform:scale(.7);opacity:.8;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .4s;pointer-events:none}
+.portal-kpi>*{position:relative;z-index:1}
+.portal-kpi .valor{transition:transform .28s cubic-bezier(.2,.8,.2,1);transform-origin:left center}
+.portal-kpi .topo-k svg,.portal-kpi .topo-k .material-symbols-outlined,.portal-kpi .ic-k{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
+.portal-kpi svg.spark{transition:transform .35s ease,filter .35s}
+.portal-kpi:hover,.portal-kpi:focus-within{transform:translateY(-4px);border-color:color-mix(in srgb,var(--secondary) 45%,transparent);box-shadow:0 14px 30px rgba(0,53,148,.16),0 4px 10px rgba(15,23,42,.08)}
+.portal-kpi:hover::before,.portal-kpi:focus-within::before{transform:scaleX(1)}
+.portal-kpi:hover::after{transform:scale(1.6);opacity:1}
+.portal-kpi:hover .valor{transform:scale(1.045)}
+.portal-kpi:hover .topo-k .material-symbols-outlined,.portal-kpi:hover .ic-k{transform:scale(1.18) rotate(-6deg)}
+.portal-kpi:hover svg.spark{transform:scaleY(1.12);filter:drop-shadow(0 2px 4px rgba(0,81,213,.25))}
+.portal-kpi:active{transform:translateY(-1px) scale(.99)}
+.portal-kpi.hero{border-color:transparent}
+.portal-kpi.hero::before{background:linear-gradient(90deg,#93C5FD,#ffffff)}
+.portal-kpi.hero::after{background:rgba(255,255,255,.08)}
+.portal-kpi.hero:hover{box-shadow:0 16px 34px rgba(0,30,90,.38),0 0 0 1px rgba(147,197,253,.5)}
+.portal-kpi.an-kpi-bad::before{background:linear-gradient(90deg,var(--bad),#f87171)}
+.portal-kpi.an-kpi-bad:hover{border-color:color-mix(in srgb,var(--bad) 45%,transparent);box-shadow:0 14px 30px rgba(186,26,26,.16),0 4px 10px rgba(15,23,42,.08)}
+html.dark .portal-kpi:hover{box-shadow:0 14px 30px rgba(0,0,0,.5),0 0 0 1px rgba(147,197,253,.25)}
+@media (prefers-reduced-motion:reduce){.portal-kpi,.portal-kpi::before,.portal-kpi::after,.portal-kpi .valor,.portal-kpi svg,.portal-kpi .ic-k{transition:none!important}.portal-kpi:hover,.portal-kpi:hover .valor,.portal-kpi:hover .ic-k{transform:none}}
+@media print{.portal-kpi::before,.portal-kpi::after{display:none}}
+.portal-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
+.portal-chip .material-symbols-outlined{font-size:14px}
+.portal-chip.ok{background:var(--ok-bg);color:var(--ok)} .portal-chip.warn{background:var(--warn-bg);color:var(--warn)}
+.portal-chip.bad{background:var(--bad-bg);color:var(--bad)} .portal-chip.info{background:var(--info-bg);color:var(--info)}
+.portal-chip.neutro{background:var(--container);color:var(--on-variant)}
+.portal-btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:600;background:var(--low);color:var(--on-surface);transition:background .15s,transform .1s}
+.portal-btn:hover{background:var(--high)} .portal-btn:active{transform:scale(.98)}
+.portal-btn.primario{background:var(--secondary);color:var(--on-primary)} .portal-btn.primario:hover{background:var(--primary)}
+[hidden]{display:none!important}
+.portal-btn .material-symbols-outlined{font-size:18px}
+.portal-seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--low)}
+.portal-seg>button{padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;color:var(--on-variant)}
+.portal-seg>button[aria-pressed="true"]{background:var(--primary);color:var(--on-primary);box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.portal-sel{height:32px;padding:0 10px;border-radius:999px;border:1px solid var(--outline-variant);background:var(--lowest);color:var(--on-surface);font-size:12px;outline:none;cursor:pointer;max-width:260px}
+.portal-sel:focus{border-color:var(--secondary)}
+.portal-sel.cheio{height:36px;border-radius:8px;border:0;background:var(--low);font-weight:600}
+.portal-input{height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--outline-variant);background:var(--lowest);font-size:12px;outline:none}
+.portal-input:focus{border-color:var(--secondary)}
+.portal-link{font-size:12px;font-weight:600;color:var(--secondary);padding:4px 10px;border-radius:999px;display:inline-flex;align-items:center;gap:4px}
+.portal-link:hover{background:var(--high)} .portal-link .material-symbols-outlined{font-size:16px}
+.portal-callout{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px;border-radius:12px;background:var(--warn-bg);color:var(--on-surface);box-shadow:var(--sombra)}
+.portal-callout .ic{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none;background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+.portal-callout .tt{font-size:14px;font-weight:600;color:var(--warn)} .portal-callout p{font-size:14px;margin-top:2px}
+.portal-callout.info{background:var(--info-bg)} .portal-callout.info .ic{background:color-mix(in srgb,var(--info) 18%,transparent);color:var(--info)} .portal-callout.info .tt{color:var(--info)}
+.portal-callout.bad{background:var(--bad-bg)} .portal-callout.bad .ic{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)} .portal-callout.bad .tt{color:var(--bad)}
+.portal-progress{height:8px;border-radius:999px;background:var(--container);overflow:hidden} .portal-progress>i{display:block;height:100%;border-radius:999px;background:var(--secondary)}
+.portal-legenda{display:flex;flex-wrap:wrap;align-items:center;gap:14px;font-size:11px;font-weight:600;color:var(--on-variant)}
+.portal-legenda i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-2px}
+.portal-pagehead{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.portal-pagehead h1{font-size:30px;line-height:38px;font-weight:700;letter-spacing:-.015em}
+.portal-pagehead p{color:var(--on-variant);margin-top:4px}
+.portal-pagehead .selos{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.portal-tablewrap{overflow-x:auto;border-radius:8px;width:100%}
+.portal-table{width:100%;border-collapse:collapse;text-align:left;font-size:14px}
+.portal-table th{padding:12px 16px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--on-variant);background:var(--low);white-space:nowrap}
+.portal-table td{padding:12px 16px;border-bottom:1px solid color-mix(in srgb,var(--outline-variant) 30%,transparent);vertical-align:middle}
+.portal-table tbody tr:hover{background:color-mix(in srgb,var(--high) 45%,transparent)}
+.portal-table tfoot td{background:var(--container);font-weight:700;border-bottom:0}
+.portal-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap} .portal-table .c{text-align:center}
+.portal-table th.num{text-align:right} .portal-table th.c{text-align:center}
+.portal-vazio{padding:32px;text-align:center;color:var(--on-variant);border:1px dashed var(--outline-variant);border-radius:12px;background:var(--lowest)}
+
+/* ---------- responsivo e impressão ---------- */
+@media (max-width:1023px){
+  #menu{transform:translateX(-100%)} #menu.aberto{transform:none} #menu .fechar{display:flex}
+  #fundo-menu.aberto{display:block} #portal-corpo{margin-left:0} #btn-menu{display:flex}
+  #topo,#filtros-faixa{padding-left:16px;padding-right:16px} #conteudo{padding:16px}
+  .caixa-busca input{width:150px} .usuario .chip,.logo-mini{display:none} .btn-topo span.txt{display:none}
+}
+@media (max-width:640px){#topo .crumb a,#topo .crumb .sep{display:none} .caixa-busca{display:none} .portal-pagehead h1{font-size:24px;line-height:32px}
+  #filtros{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch} #filtros>*{flex:none}}
+@media print{#menu,#topo,#filtros-faixa,#fundo-menu,.portal-tabs{display:none!important} #portal-corpo{margin-left:0} #conteudo{padding:0} body{background:#fff}}
+</style>
+<script>
+  try { if (localStorage.getItem('portal_tema') === 'escuro') document.documentElement.classList.add('dark'); } catch (e) {}
+</script>
+<script>
+  // Se algum script falhar, mostra o erro na tela em vez de deixar a página em branco.
+  window.addEventListener('error', function (ev) {
+    try {
+      var d = document.getElementById('portal-erro-js');
+      if (!d) { d = document.createElement('pre'); d.id = 'portal-erro-js'; d.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;margin:0;padding:10px 12px;border-radius:8px;background:#fff1f2;color:#9f1239;border:1px solid #fecdd3;font:12px/1.4 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto'; (document.body || document.documentElement).appendChild(d); }
+      d.textContent += (ev.message || 'Erro') + ' (' + String(ev.filename || '').split('/').pop() + ':' + ev.lineno + ')\n';
+    } catch (e) {}
+  });
+</script>
+<script>
+window.PORTAL_SHELL = (function () {
+  const APP_URL = <?!= JSON.stringify(APP_URL) ?>;
+  const EMAIL = <?!= JSON.stringify(EMAIL) ?>;
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const ICONES = { analise:'calendar_view_week', cartoes:'credit_card', fluxo:'payments', maquinas:'point_of_sale' };
+  let cfg = {}, atual = null, toastTimer = null;
+  const link = chave => APP_URL + '?p=' + encodeURIComponent(chave);
+
+  function paginasDe(c) {
+    if (c.paginas) return c.paginas;
+    return (c.grupos || []).reduce((a, g) => a.concat(g.itens || []), []);   // compatibilidade com a versão anterior
+  }
+
+  function html() {
+    const dashs = (cfg.dashboards || []);
+    const paginas = paginasDe(cfg);
+    return `
+    <aside id="menu">
+      <div class="topo">
+        <div class="marca">
+          <div class="selo"><div class="logo-portal" role="img" aria-label="Logo"></div></div>
+          <div class="grow"><b>Dashboards Financeiros</b><small>Portal Financeiro</small></div>
+          <button id="btn-fecha-menu" type="button" class="fechar" aria-label="Fechar menu"><span class="material-symbols-outlined">close</span></button>
+        </div>
+        <a class="inicio" href="${link('home')}" target="_top"><span class="material-symbols-outlined" style="font-size:18px">home</span><span>Início · outros dashboards</span></a>
+        <nav id="nav" aria-label="Dashboards">
+          <div class="tit">Dashboards</div>
+          ${dashs.map(d => `<a href="${link(d.chave)}" target="_top" ${d.chave === cfg.chave ? 'aria-current="page"' : ''}>
+            <span class="material-symbols-outlined">${ICONES[d.chave] || 'dashboard'}</span><span>${esc(d.titulo)}</span></a>`).join('')}
+        </nav>
+      </div>
+      <div class="status">
+        <div class="l1"><span id="st-ponto" class="ponto"></span><span>Status da Sincronização</span></div>
+        <div class="l2"><span id="st-fonte">Aguardando dados…</span><span id="st-dados">&nbsp;</span></div>
+        <button id="btn-atualizar" type="button"><span id="ic-atualizar" class="material-symbols-outlined">sync</span><span>Atualizar dados</span></button>
+      </div>
+    </aside>
+    <div id="fundo-menu"></div>
+    <div id="portal-corpo">
+      <div id="cabeca">
+        <header id="topo">
+          <div class="esq">
+            <button id="btn-menu" type="button" aria-label="Abrir menu"><span class="material-symbols-outlined" style="font-size:22px">menu</span></button>
+            <div class="logo-mini"><div class="logo-portal" role="img" aria-label="Logo"></div></div>
+            <div class="crumb"><a href="${link('home')}" target="_top">Dashboards</a><span class="material-symbols-outlined sep">chevron_right</span>
+              <span>${esc(cfg.titulo || '')}</span><span class="material-symbols-outlined sep">chevron_right</span><span id="crumb" class="atual"></span></div>
+          </div>
+          <div class="dir">
+            ${cfg.busca ? `<div class="caixa-busca"><span class="material-symbols-outlined">search</span>
+              <input id="busca" type="search" placeholder="${esc(cfg.busca.placeholder || 'Buscar…')}" aria-label="Buscar"><kbd>/</kbd></div>` : ''}
+            <button id="btn-tema" type="button" class="btn-icone" aria-label="Alternar modo escuro"><span id="ic-tema" class="material-symbols-outlined" style="font-size:18px">dark_mode</span></button>
+            ${(cfg.exportar || []).length ? `<div class="menu-exp"><button id="btn-exp" type="button" class="btn-topo"><span class="material-symbols-outlined" style="font-size:18px">file_download</span><span class="txt">Exportar</span><span class="material-symbols-outlined" style="font-size:16px">arrow_drop_down</span></button>
+              <div id="menu-exp">${cfg.exportar.map((e, i) => `<button type="button" data-exp="${i}"><span class="material-symbols-outlined">${esc(e.icone || 'download')}</span>${esc(e.rotulo)}</button>`).join('')}</div></div>` : ''}
+            <div class="usuario"><div class="chip"><i></i><span>${esc(EMAIL)}</span></div><div class="avatar"><span class="material-symbols-outlined">person</span></div></div>
+          </div>
+        </header>
+        <div id="filtros-faixa"><div id="filtros"></div></div>
+      </div>
+      <main id="conteudo">
+        ${paginas.length > 1 || cfg.selo ? `<div class="portal-tabs">
+          <div class="abas" role="tablist">${paginas.map(p => `<button type="button" role="tab" class="portal-tab" data-aba="${esc(p.id)}"><span class="material-symbols-outlined">${esc(p.icone || 'chevron_right')}</span><span>${esc(p.rotulo)}</span></button>`).join('')}</div>
+          ${cfg.selo ? `<span class="portal-chip neutro"><span class="portal-pulso" style="width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block"></span><span id="portal-selo">${esc(cfg.selo)}</span></span>` : ''}
+        </div>` : ''}
+        <div id="portal-slot"></div>
+      </main>
+    </div>
+    <div id="portal-toast"></div>`;
+  }
+
+  function aplicaTema(escuro) {
+    document.documentElement.classList.toggle('dark', escuro);
+    const ic = document.getElementById('ic-tema'); if (ic) ic.textContent = escuro ? 'light_mode' : 'dark_mode';
+    try { localStorage.setItem('portal_tema', escuro ? 'escuro' : 'claro'); } catch (e) {}
+    document.dispatchEvent(new CustomEvent('portal:tema', { detail:{ escuro } }));
+  }
+  const abreMenu = a => { document.getElementById('menu').classList.toggle('aberto', a); document.getElementById('fundo-menu').classList.toggle('aberto', a); };
+
+  function irPara(id, silencioso) {
+    const secoes = [...document.querySelectorAll('#portal-slot [data-pagina]')];
+    if (!secoes.some(s => s.dataset.pagina === id)) id = cfg.inicial || (secoes[0] && secoes[0].dataset.pagina);
+    atual = id;
+    secoes.forEach(s => { s.hidden = s.dataset.pagina !== id; });
+    let rotulo = '';
+    document.querySelectorAll('.portal-tab').forEach(b => {
+      const ativo = b.dataset.aba === id;
+      b.setAttribute('aria-selected', ativo ? 'true' : 'false');
+      if (ativo) rotulo = b.querySelector('span:last-child').textContent;
+    });
+    if (!rotulo) { const p = paginasDe(cfg).find(x => x.id === id); rotulo = p ? p.rotulo : ''; }
+    document.getElementById('crumb').textContent = rotulo;
+    try { if (!silencioso) history.replaceState(null, '', '#/' + id); } catch (e) {}
+    abreMenu(false); window.scrollTo(0, 0);
+    if (cfg.onNavegar) cfg.onNavegar(id);
+  }
+
+  function setStatus(s) {
+    s = s || {};
+    const p = document.getElementById('st-ponto'); if (!p) return;
+    p.style.background = s.erro ? '#FBBF24' : (s.dados || s.fonte ? '#34D399' : '#94A3B8');
+    document.getElementById('st-fonte').textContent = s.erro ? 'Falha: ' + s.erro : (s.fonte || '');
+    document.getElementById('st-dados').textContent = s.erro ? '' : (s.dados ? 'Dados de ' + s.dados : '');
+  }
+  function toast(t) {
+    const el = document.getElementById('portal-toast'); if (!el) return;
+    el.textContent = t; el.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.display = 'none'; }, 3500);
+  }
+
+  function init(c) {
+    cfg = c || {};
+    const conteudo = document.getElementById('portal-conteudo');
+    const app = document.createElement('div'); app.id = 'portal-app'; app.innerHTML = html();
+    document.body.prepend(app);
+    if (conteudo) { document.getElementById('portal-slot').appendChild(conteudo); conteudo.hidden = false; }
+    aplicaTema(document.documentElement.classList.contains('dark'));
+    document.getElementById('btn-tema').addEventListener('click', () => aplicaTema(!document.documentElement.classList.contains('dark')));
+    document.getElementById('btn-menu').addEventListener('click', () => abreMenu(true));
+    document.getElementById('btn-fecha-menu').addEventListener('click', () => abreMenu(false));
+    document.getElementById('fundo-menu').addEventListener('click', () => abreMenu(false));
+    document.querySelectorAll('.portal-tab').forEach(b => b.addEventListener('click', () => irPara(b.dataset.aba)));
+    const bt = document.getElementById('btn-atualizar');
+    bt.addEventListener('click', async () => {
+      if (!cfg.atualizar) return;
+      const ic = document.getElementById('ic-atualizar'); ic.classList.add('portal-gira'); bt.disabled = true;
+      try { await cfg.atualizar(); } catch (e) { toast('Não foi possível atualizar: ' + (e && e.message || e)); }
+      ic.classList.remove('portal-gira'); bt.disabled = false;
+    });
+    const busca = document.getElementById('busca');
+    if (busca && cfg.busca && cfg.busca.aoDigitar) busca.addEventListener('input', e => cfg.busca.aoDigitar(e.target.value));
+    const be = document.getElementById('btn-exp'), me = document.getElementById('menu-exp');
+    if (be) {
+      be.addEventListener('click', ev => { ev.stopPropagation(); me.classList.toggle('aberto'); });
+      document.addEventListener('click', () => me.classList.remove('aberto'));
+      me.querySelectorAll('[data-exp]').forEach(b => b.addEventListener('click', () => { me.classList.remove('aberto'); cfg.exportar[+b.dataset.exp].fn(); }));
+    }
+    let ultimo = 0;     // atalhos: "/" foca a busca; "g" e depois "h" volta ao portal
+    window.addEventListener('keydown', e => {
+      const t = (document.activeElement && document.activeElement.tagName || '').toLowerCase();
+      if (['input', 'select', 'textarea'].includes(t) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === '/' && busca) { e.preventDefault(); busca.focus(); busca.select(); return; }
+      if (e.key === 'g') ultimo = Date.now();
+      else if (e.key === 'h' && Date.now() - ultimo < 1200) { ultimo = 0; window.top.location.href = link('home'); }
+    });
+    let inicial = cfg.inicial;
+    try { const h = (location.hash || '').replace(/^#\//, ''); if (h) inicial = h; } catch (e) {}
+    irPara(inicial, true);
+  }
+
+  function setSelo(t) { const e = document.getElementById('portal-selo'); if (e) e.textContent = t; }
+
+  return {
+    init, irPara, setStatus, setSelo, toast, link,
+    ativa: () => atual,
+    get filtros() { document.getElementById('filtros-faixa').classList.add('visivel'); return document.getElementById('filtros'); },
+    cor: n => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim(),
+    escuro: () => document.documentElement.classList.contains('dark')
+  };
+})();
+</script>

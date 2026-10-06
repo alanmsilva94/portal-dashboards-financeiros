@@ -1,0 +1,87 @@
+<!-- Biblioteca de dados compartilhada. Uso nos dashboards: diretiva include com o nome portal_dados, no head.
+     Substitui os seletores de pasta/arquivo: os dados vêm do Drive via Apps Script.
+
+     PORTAL.carregar(CHAVE, { cellDates:true, filtro:(a)=>true, onProgress:(feitos,total,arq)=>{} })
+        -> Promise<{ geradoEm, itens:[{ nome, relPath, mtime, workbook }] }>
+        'workbook' é um workbook SheetJS equivalente ao de XLSX.read(arquivo, {cellDates}).
+     PORTAL.listar(CHAVE) / PORTAL.lerAbas(CHAVE, arquivo)  -> versões de baixo nível.
+     PORTAL.voltarInicio()  -> vai ao portal (home). PORTAL.EMAIL / PORTAL.APP_URL. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+window.PORTAL = (function () {
+  var APP_URL = <?!= JSON.stringify(APP_URL) ?>;
+  var EMAIL = <?!= JSON.stringify(EMAIL) ?>;
+  var MARCA_DATA = '\u0001D:'; // data exportada pelo sincronizador: '\u0001D:2026-01-05T00:00:00'
+
+  function chamar(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (ok, erro) {
+      var r = google.script.run.withSuccessHandler(ok).withFailureHandler(function (e) { erro(new Error(e && e.message || e)); });
+      r[fn].apply(r, args);
+    });
+  }
+
+  function listar(chave) { return chamar('api_listar', chave); }
+  function lerAbas(chave, arquivo) { return chamar('api_ler', chave, arquivo).then(function (r) { return r.abas; }); }
+
+  // Arquivo grande pode vir em várias partes (manifest.partes): as linhas de cada aba são concatenadas em ordem.
+  function lerArquivo(chave, a) {
+    var nomes = a.partes || [a.arquivo];
+    return nomes.reduce(function (p, nome) {
+      return p.then(function (acc) {
+        return lerAbas(chave, nome).then(function (abas) {
+          Object.keys(abas).forEach(function (k) { acc[k] = (acc[k] || []).concat(abas[k]); });
+          return acc;
+        });
+      });
+    }, Promise.resolve({}));
+  }
+
+  function excelSerial(d) { return (d.getTime() - Date.UTC(1899, 11, 30)) / 86400000 - d.getTimezoneOffset() / 1440; }
+
+  function montarWorkbook(abas, cellDates) {
+    var wb = XLSX.utils.book_new();
+    Object.keys(abas).forEach(function (nome) {
+      var linhas = abas[nome].map(function (l) {
+        return l.map(function (c) {
+          if (typeof c === 'string' && c.indexOf(MARCA_DATA) === 0) {
+            var d = new Date(c.slice(MARCA_DATA.length));
+            return cellDates ? d : excelSerial(d);
+          }
+          return c;
+        });
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(linhas, { cellDates: !!cellDates }), nome);
+    });
+    return wb;
+  }
+
+  function carregar(chave, opcoes) {
+    opcoes = opcoes || {};
+    var cellDates = opcoes.cellDates !== false;
+    return listar(chave).then(function (m) {
+      var arquivos = m.arquivos.filter(opcoes.filtro || function () { return true; });
+      var itens = new Array(arquivos.length), feitos = 0, prox = 0, paralelo = opcoes.paralelo || 3;
+      if (!arquivos.length) return { geradoEm: m.geradoEm, itens: [] };
+      return new Promise(function (ok, erro) {
+        function proximo() {
+          if (prox >= arquivos.length) return;
+          var i = prox++, a = arquivos[i];
+          lerArquivo(chave, a).then(function (abas) {
+            itens[i] = { nome: a.relPath.split('/').pop(), relPath: a.relPath, mtime: a.mtime, workbook: montarWorkbook(abas, cellDates) };
+            feitos++;
+            if (opcoes.onProgress) opcoes.onProgress(feitos, arquivos.length, a.relPath);
+            if (feitos === arquivos.length) ok({ geradoEm: m.geradoEm, itens: itens });
+            else proximo();
+          }, erro);
+        }
+        for (var k = 0; k < Math.min(paralelo, arquivos.length); k++) proximo();
+      });
+    });
+  }
+
+  function voltarInicio() { window.top.location.href = APP_URL + '?p=home'; }
+
+  return { APP_URL: APP_URL, EMAIL: EMAIL, listar: listar, lerAbas: lerAbas, carregar: carregar, voltarInicio: voltarInicio };
+})();
+</script>

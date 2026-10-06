@@ -1,0 +1,1731 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluxo de Caixa · Portal Financeiro</title>
+<?!= include('shell_portal') ?>
+<?!= include('portal_dados') ?>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
+<?!= include('dash_fluxo_semente') ?>
+<style>
+  /* Estilos proprios do Fluxo de Caixa (prefixo fx-). Cores somente por variaveis do shell (claro/escuro). */
+  .fx-eyebrow{ font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--on-variant); }
+  .fx-eyebrow.atual{ color:var(--primary); }
+  .fx-h2{ font-size:18px; line-height:24px; font-weight:600; margin:0; }
+  #portal-conteudo .portal-pagehead > div{ min-width:0; max-width:100%; }
+  #portal-conteudo .selos .portal-chip, #portal-conteudo .cab .portal-chip{ white-space:normal; }
+  .fx-sec{ display:flex; flex-direction:column; gap:16px; }
+  .fx-sec-tit{ display:flex; align-items:center; gap:10px; }
+  .fx-sq{ display:inline-block; width:10px; height:10px; border-radius:3px; flex:none; }
+  .fx-hist{ gap:32px; }
+
+  .fx-chart{ position:relative; width:100%; height:288px; }
+  .fx-chart.tall{ height:360px; } .fx-chart.sec{ height:260px; } .fx-chart.donut{ height:240px; }
+  .fx-nota{ display:flex; align-items:center; gap:6px; margin-top:4px; font-size:11.5px; color:var(--on-variant); }
+  .fx-nota i{ width:12px; height:10px; border:1.5px solid var(--primary); border-radius:2px; background:color-mix(in srgb,var(--primary) 12%,transparent); flex:none; }
+  .fx-kpi{ container-type:inline-size; }
+  .fx-kpi .valor{ white-space:nowrap; font-size:clamp(20px,10.5cqi,28px); }
+  .fx-kpi-nota{ font-size:12px; line-height:16px; color:var(--on-variant); }
+  .fx-dest{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:14px; border-radius:8px; background:var(--low); }
+  .fx-dest > div{ display:flex; flex-direction:column; min-width:0; }
+  .fx-dest .l{ font-size:11px; font-weight:600; color:var(--on-variant); }
+  .fx-dest .v{ font-size:17px; font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .fx-nota-anual{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--on-variant); }
+  .fx-nota-anual i{ width:8px; height:8px; border-radius:50%; background:var(--primary); display:inline-block; }
+  .fx-callout-tag{ align-self:flex-start; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; flex:none; background:color-mix(in srgb,var(--warn) 18%,transparent); color:var(--warn); }
+  .fx-rod{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:14px 24px; background:var(--low); color:var(--on-variant); font-size:12px; }
+  .fx-rod .material-symbols-outlined{ font-size:18px; vertical-align:-4px; margin-right:6px; }
+  .fx-semcard{ padding:0; overflow:hidden; gap:0; }
+  .fx-semcard > .cab{ padding:24px 24px 16px; }
+
+  /* tabelas: primeira coluna a esquerda, demais a direita (padrao .portal-table) */
+  .portal-table.fx-r th, .portal-table.fx-r td{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .portal-table.fx-r th:first-child, .portal-table.fx-r td:first-child{ text-align:left; }
+  .portal-table.fx-r th.c, .portal-table.fx-r td.c{ text-align:center; }
+  .portal-table.fx-r td:first-child{ font-weight:500; }
+  .portal-table.fx-r tbody tr:last-child td{ border-bottom:0; }
+  .portal-table.fx-sm th, .portal-table.fx-sm td{ padding:9px 12px; font-size:13px; }
+  #tblFluxo th, #tblFluxo td{ padding-left:8px; padding-right:8px; }
+  .portal-table.fx-larga th, .portal-table.fx-larga td{ padding-left:24px; padding-right:24px; }
+  .portal-table tr.fx-parcial td{ font-style:italic; color:var(--on-variant); background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--primary) 7%,transparent) 6px 12px); }
+  .fx-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; vertical-align:middle; }
+  .fx-lateral{ overflow:auto; max-height:360px; }
+  .fx-lateral.livre{ max-height:none; }
+  .portal-table.fx-mensal th, .portal-table.fx-mensal td{ padding:9px 10px; font-size:12px; }
+  .portal-table.fx-mensal thead th:first-child, .portal-table.fx-mensal tbody td:first-child, .portal-table.fx-mensal tfoot td:first-child{ position:sticky; left:0; z-index:2; box-shadow:1px 0 0 var(--outline-variant); }
+  .portal-table.fx-mensal thead th:first-child{ background:var(--low); z-index:3; }
+  .portal-table.fx-mensal tbody td:first-child{ background:var(--lowest); }
+  .portal-table.fx-mensal tfoot td:first-child{ background:var(--container); text-transform:uppercase; letter-spacing:.04em; }
+  .portal-table.fx-mensal th.fx-colvar, .portal-table.fx-mensal td.fx-colvar{ position:sticky; right:0; z-index:2; text-align:center; box-shadow:-1px 0 0 var(--outline-variant); }
+  .portal-table.fx-mensal th.fx-colvar{ background:var(--low); z-index:3; }
+  .portal-table.fx-mensal td.fx-colvar{ background:var(--lowest); }
+  .portal-table.fx-mensal tfoot td.fx-colvar{ background:var(--container); }
+  .portal-table.fx-mensal th.fx-colparc{ font-style:italic; }
+  .portal-table.fx-mensal td.fx-colparc{ font-style:italic; color:var(--on-variant); background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--primary) 7%,transparent) 6px 12px); }
+  .fx-rodape-mensal{ display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; font-size:12px; color:var(--on-variant); }
+
+  /* legenda ranqueada das roscas */
+  .fx-leg{ list-style:none; margin:14px 0 0; padding:0; font-size:11.5px; }
+  .fx-leg li{ display:grid; grid-template-columns:22px 10px 1fr auto; gap:6px; align-items:center; padding:5px 8px; border-radius:6px; }
+  .fx-leg li:hover{ background:var(--low); }
+  .fx-leg .rk{ font-size:11px; color:var(--outline); }
+  .fx-leg .rk:not(:empty)::before{ content:"#"; }
+  .fx-leg .chip{ width:10px; height:10px; border-radius:50%; display:block; }
+  .fx-leg .nm{ font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fx-leg .vl{ color:var(--on-variant); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .fx-leg .pc{ display:inline-block; min-width:40px; text-align:right; margin-left:6px; color:var(--on-surface); font-weight:700; }
+  .fx-leg li.tot{ border-top:1px solid var(--outline-variant); border-radius:0; margin-top:4px; padding-top:8px; }
+  .fx-leg li.tot .nm{ color:var(--outline); text-transform:uppercase; letter-spacing:.06em; font-size:10.5px; }
+  .fx-leg li.tot .vl{ color:var(--on-surface); font-weight:700; }
+  .fx-aviso{ font-size:12px; line-height:1.65; color:var(--on-variant); background:var(--low); border:1px dashed var(--outline-variant); border-radius:8px; padding:16px 18px; margin:6px 0 4px; }
+  .fx-aviso b{ color:var(--on-surface); }
+  .fx-aviso code{ background:var(--lowest); border:1px solid var(--outline-variant); padding:1px 5px; border-radius:4px; font-size:11px; }
+
+  /* filtros (faixa do shell) */
+  .fx-ms{ position:relative; }
+  .fx-ms-btn{ display:inline-flex; align-items:center; gap:2px; }
+  .fx-ms-btn .material-symbols-outlined{ font-size:18px; }
+  .fx-ms-pop{ position:absolute; left:0; top:38px; min-width:210px; max-height:300px; overflow:auto; padding:6px; border-radius:10px; background:var(--lowest); border:1px solid var(--outline-variant); box-shadow:0 8px 24px rgba(15,23,42,.18); z-index:70; }
+  .fx-ms-pop[hidden]{ display:none; }
+  .fx-ms-op{ display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:12px; cursor:pointer; }
+  .fx-ms-op:hover{ background:var(--low); }
+  .fx-ms-op input{ accent-color:var(--primary); }
+  .fx-ms-limpa{ display:block; width:100%; text-align:left; padding:6px 8px; margin-bottom:4px; border-radius:6px; font-size:11px; font-weight:600; color:var(--secondary); }
+  .fx-ms-limpa:hover{ background:var(--low); }
+  #filtros button:focus-visible, #portal-conteudo button:focus-visible, #portal-conteudo input:focus-visible{ outline:2px solid var(--primary); outline-offset:2px; }
+
+  /* estado carregando / erro */
+  .fx-estado{ max-width:560px; margin:40px auto 0; padding:32px; display:flex; flex-direction:column; align-items:center; gap:12px; text-align:center; }
+  .fx-estado .ic{ font-size:40px; color:var(--primary); }
+  .fx-estado .ic.erro{ color:var(--bad); }
+  .fx-estado p{ font-size:13px; color:var(--on-variant); }
+  .fx-estado .prog{ width:100%; max-width:320px; }
+  .fx-estado .prog-txt{ font-size:11px; color:var(--on-variant); margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fx-estado .prog-barra{ transition:width .2s; }
+
+  body.sem-base [data-pagina]{ display:none !important; }
+  #dlAviso{ position:fixed; right:16px; bottom:16px; z-index:2000; display:none; align-items:center; gap:10px; max-width:420px; padding:10px 14px; border-radius:8px; background:var(--inverse); color:var(--on-inverse); font-size:12px; box-shadow:0 8px 28px rgba(0,0,0,.35); }
+  #dlAviso.on{ display:flex; }
+  #dlAviso button{ border:1px solid rgba(255,255,255,.35); background:rgba(255,255,255,.1); color:inherit; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:12px; white-space:nowrap; }
+  #dlModal{ position:fixed; inset:0; z-index:2100; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(5,10,25,.6); }
+  #dlModal.on{ display:flex; }
+  #dlModal .caixa{ width:min(760px,100%); max-height:90vh; display:flex; flex-direction:column; gap:10px; padding:18px; border-radius:12px; background:var(--lowest); color:var(--on-surface); box-shadow:0 20px 60px rgba(0,0,0,.4); }
+  #dlModal textarea{ width:100%; height:320px; resize:vertical; font-family:ui-monospace,Consolas,monospace; font-size:11.5px; padding:8px; border:1px solid var(--outline-variant); border-radius:8px; background:var(--low); color:var(--on-surface); }
+  #dlModal .acoes{ display:flex; gap:8px; justify-content:flex-end; }
+  @media (max-width:760px){ .fx-dest{ grid-template-columns:1fr; } .fx-chart.tall{ height:300px; } .fx-rod{ padding:12px 16px; } .fx-semcard > .cab{ padding:16px 16px 12px; } }
+  @media print{ .fx-ms-pop,#dlAviso,#dlModal{ display:none !important; } .fx-chart{ height:240px; } }
+</style>
+</head>
+<body>
+
+<div id="portal-conteudo" hidden>
+
+  <div id="estado-base" hidden></div>
+
+  <!-- ===================== VISÃO GERAL ===================== -->
+  <section data-pagina="visao"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Visão Geral das Finanças</h1>
+        <p>Como entidade do terceiro setor, o indicador central não é "lucro", e sim o <b>equilíbrio entre entradas e saídas</b> e a <b>sustentabilidade do caixa</b> ao longo do tempo.</p>
+      </div>
+      <div class="selos"><span class="portal-chip info" data-asof></span></div>
+    </div>
+
+    <div id="calloutVisao"></div>
+    <div id="kpi-visao"></div>
+
+    <div class="g">
+      <div class="portal-panel c7">
+        <div class="cab">
+          <div><h2 class="t">Entradas × Saídas (mensal)</h2><div class="s">Valor de cada mês · passe o mouse para ver os valores · clique na legenda para ocultar uma série</div></div>
+          <span class="portal-chip info" data-janela></span>
+        </div>
+        <div id="destVisao" class="fx-dest"></div>
+        <div class="fx-chart"><canvas id="chartVisaoLinhas" role="img" aria-label="Gráfico de Entradas e Saídas mensais"></canvas></div>
+      </div>
+      <div class="portal-panel c5">
+        <div class="cab">
+          <div><h2 class="t">Resultado operacional anual</h2><div class="s">Soma do fluxo de caixa (entradas – saídas) por ano · em R$ milhões</div></div>
+          <span class="portal-chip info" id="chipAnosVisao"></span>
+        </div>
+        <div class="fx-chart"><canvas id="chartVisaoAnual" role="img" aria-label="Resultado operacional anual, barras positivas e negativas"></canvas></div>
+        <div id="notaVisaoAnual"></div>
+      </div>
+
+      <div class="portal-panel c12">
+        <div><h2 class="t">Gastos por setor — 2025 vs. 2026 (média mensal)</h2><div class="s">Comparativo dos setores de maior representatividade orçamentária</div></div>
+        <div class="fx-chart tall"><canvas id="chartVisaoSetores" role="img" aria-label="Gastos por setor, média mensal de 2025 contra 2026"></canvas></div>
+      </div>
+
+      <div class="portal-panel fx-semcard c12">
+        <div class="cab">
+          <div><h2 class="t">Demonstrativo mensal</h2><div class="s">Entradas, saídas, saldo líquido e status de cada mês · mais recente primeiro</div></div>
+          <span class="portal-chip info" data-janela></span>
+        </div>
+        <div class="portal-tablewrap" id="wrapDemo"><table class="portal-table fx-r fx-larga" id="tblDemo"></table></div>
+        <div class="fx-rod" id="rodapeDemo"></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===================== ENTRADAS ===================== -->
+  <section data-pagina="entradas"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Entradas</h1>
+        <p>Total de receitas mensais da instituição (dízimos, ofertas e demais entradas).</p>
+      </div>
+      <div class="selos"><span class="portal-chip info" data-asof></span></div>
+    </div>
+    <div id="kpi-entradas"></div>
+    <div class="g">
+      <div class="portal-panel c8">
+        <div class="cab">
+          <div><h2 class="t">Entradas mensais</h2><div class="s">Barras = valor do mês · linha = tendência (média móvel de 6 meses)</div></div>
+          <span class="portal-chip info" data-janela></span>
+        </div>
+        <div class="fx-chart"><canvas id="chartEntradasMensal" role="img" aria-label="Entradas mensais com tendência de 6 meses"></canvas></div>
+      </div>
+      <div class="portal-panel c4">
+        <div><h2 class="t">Média mensal / ano</h2><div class="s"><span class="pos">Verde</span> = aumento · <span class="neg">rosa</span> = redução</div></div>
+        <div class="portal-tablewrap fx-lateral"><table class="portal-table fx-r fx-sm" id="tblEntradas"></table></div>
+      </div>
+      <div class="portal-panel c6">
+        <div><h2 class="t">Média mensal por ano</h2></div>
+        <div class="fx-chart sec"><canvas id="chartEntradasAnual" role="img" aria-label="Média mensal de entradas por ano"></canvas></div>
+      </div>
+      <div class="portal-panel c6">
+        <div><h2 class="t">Média histórica por mês</h2><div class="s">Sazonalidade — média de cada mês do calendário</div></div>
+        <div class="fx-chart sec"><canvas id="chartEntradasMediaMes" role="img" aria-label="Média histórica de entradas por mês do calendário"></canvas></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===================== SAÍDAS ===================== -->
+  <section data-pagina="saidas"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Saídas</h1>
+        <p>Total de despesas mensais da instituição. Dois marcos relevantes: elevação de gastos com obras (out/2021) e início do teto orçamentário (dez/2024).</p>
+      </div>
+      <div class="selos"><span class="portal-chip info" data-asof></span></div>
+    </div>
+    <div id="kpi-saidas"></div>
+    <div class="g">
+      <div class="portal-panel c8">
+        <div class="cab">
+          <div><h2 class="t">Saídas mensais</h2><div class="s">Barras = valor do mês · linha = tendência (média móvel de 6 meses)</div></div>
+          <span class="portal-chip info" data-janela></span>
+        </div>
+        <div class="fx-chart"><canvas id="chartSaidasMensal" role="img" aria-label="Saídas mensais com tendência de 6 meses"></canvas></div>
+      </div>
+      <div class="portal-panel c4">
+        <div><h2 class="t">Média mensal / ano</h2><div class="s"><span class="neg">Rosa</span> = aumento · <span class="pos">verde</span> = redução</div></div>
+        <div class="portal-tablewrap fx-lateral"><table class="portal-table fx-r fx-sm" id="tblSaidas"></table></div>
+      </div>
+      <div class="portal-panel c6">
+        <div><h2 class="t">Média mensal por ano</h2></div>
+        <div class="fx-chart sec"><canvas id="chartSaidasAnual" role="img" aria-label="Média mensal de saídas por ano"></canvas></div>
+      </div>
+      <div class="portal-panel c6">
+        <div><h2 class="t">Média histórica por mês</h2><div class="s">Sazonalidade — média de cada mês do calendário</div></div>
+        <div class="fx-chart sec"><canvas id="chartSaidasMediaMes" role="img" aria-label="Média histórica de saídas por mês do calendário"></canvas></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===================== FLUXO DE CAIXA ===================== -->
+  <section data-pagina="fluxo"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Fluxo de Caixa &amp; Resultado Operacional</h1>
+        <p>Resultado mensal (entradas – saídas). Valores negativos indicam meses em que as saídas superaram as entradas — o principal indicador de sustentabilidade financeira da instituição.</p>
+      </div>
+      <div class="selos"><span class="portal-chip info" data-asof></span></div>
+    </div>
+    <div id="kpi-fluxo"></div>
+    <div class="portal-panel">
+      <div class="cab">
+        <div><h2 class="t">Fluxo de caixa mensal</h2><div class="s"><span class="pos">Verde</span> = superávit · <span class="neg">rosa</span> = déficit · linha = tendência (média móvel de 6 meses)</div></div>
+        <span class="portal-chip info" data-janela></span>
+      </div>
+      <div class="fx-chart tall"><canvas id="chartFluxoMensal" role="img" aria-label="Fluxo de caixa mensal, superávit e déficit, com tendência de 6 meses"></canvas></div>
+    </div>
+    <div class="g">
+      <div class="portal-panel c5">
+        <div><h2 class="t">Resultado operacional acumulado por ano</h2><div class="s">Saldo líquido de cada exercício</div></div>
+        <div class="fx-chart"><canvas id="chartFluxoAnual" role="img" aria-label="Resultado operacional acumulado por ano"></canvas></div>
+      </div>
+      <div class="portal-panel c7">
+        <div><h2 class="t">Demonstrativo anual do fluxo</h2><div class="s">Variação do resultado: <span class="pos">verde</span> = melhora · <span class="neg">rosa</span> = piora</div></div>
+        <div class="portal-tablewrap fx-lateral livre"><table class="portal-table fx-r fx-sm" id="tblFluxo"></table></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===================== SETORES ===================== -->
+  <section data-pagina="setores"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Gastos por Setor</h1>
+        <p>Distribuição das saídas por área de aplicação. As roscas trazem o percentual de cada fatia; o nome, o valor e a participação de <b>todos</b> os setores ficam na lista ordenada logo abaixo de cada gráfico.</p>
+      </div>
+      <div class="selos"><span class="portal-chip info" id="asofSetores"></span></div>
+    </div>
+
+    <div class="g">
+      <div class="portal-panel c4">
+        <div><p class="fx-eyebrow">Exercício anterior</p><h2 class="fx-h2">Composição de gastos — 2025</h2><div class="s" id="hintSetores2025">Média mensal</div></div>
+        <div class="fx-chart donut"><canvas id="chartSetores2025" role="img" aria-label="Composição de gastos por setor em 2025"></canvas></div>
+        <ul class="fx-leg" id="legSetores2025"></ul>
+      </div>
+      <div class="portal-panel c4">
+        <div><p class="fx-eyebrow atual">Exercício vigente</p><h2 class="fx-h2">Composição de gastos — 2026</h2><div class="s" id="hintSetores2026">Média mensal</div></div>
+        <div class="fx-chart donut"><canvas id="chartSetores2026" role="img" aria-label="Composição de gastos por setor em 2026"></canvas></div>
+        <ul class="fx-leg" id="legSetores2026"></ul>
+      </div>
+      <div class="portal-panel c4" id="cardSetoresMes">
+        <div><p class="fx-eyebrow">Competência atual</p><h2 class="fx-h2" id="tituloSetoresMes">Composição de gastos — último mês fechado</h2><div class="s" id="hintSetoresMes">Valores do mês</div></div>
+        <div class="fx-chart donut" id="wrapSetoresMes"><canvas id="chartSetoresMes" role="img" aria-label="Composição de gastos por setor no último mês fechado"></canvas></div>
+        <ul class="fx-leg" id="legSetoresMes"></ul>
+        <div id="avisoSetoresMes"></div>
+      </div>
+
+      <div class="portal-panel c12">
+        <div><p class="fx-eyebrow">Trajetória setorial</p><h2 class="fx-h2" id="tituloEvolucaoSetores">Evolução — Obras, Imóveis e Comunicação</h2><div class="s">Média mensal por ano (R$)</div></div>
+        <div class="fx-chart tall"><canvas id="chartSetoresEvolucao" role="img" aria-label="Evolução anual da média mensal por setor"></canvas></div>
+        <div id="avisoEvolucaoAudiovisual"></div>
+      </div>
+
+      <div class="portal-panel c12">
+        <div><h2 class="t">Tabela — média mensal por setor</h2><div class="s">2025 vs. 2026 · <span class="neg">rosa</span> = aumento · <span class="pos">verde</span> = redução</div></div>
+        <div class="portal-tablewrap"><table class="portal-table fx-r fx-sm" id="tblSetores"></table></div>
+      </div>
+
+      <div class="portal-panel c12">
+        <div>
+          <p class="fx-eyebrow">Demonstrativo analítico</p>
+          <h2 class="fx-h2" id="tituloSetoresMensal">Tabela — evolução mensal por setor</h2>
+          <div class="s" id="hintSetoresMensal">Gasto de cada setor mês a mês no ano corrente</div>
+        </div>
+        <div class="portal-tablewrap" id="scrollSetoresMensal"><table class="portal-table fx-r fx-mensal" id="tblSetoresMensal"></table></div>
+        <div id="avisoSetoresMensal"></div>
+        <div class="fx-rodape-mensal">
+          <span id="contagemSetoresMensal"></span>
+          <span class="row gap-2"><i class="fx-dot" style="background:var(--ok);margin:0"></i>Redução de despesa <i class="fx-dot" style="background:var(--bad);margin:0 0 0 8px"></i>Aumento de despesa</span>
+        </div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===================== HISTÓRICO POR SETOR ===================== -->
+  <section data-pagina="historico"><div class="portal-page fx-hist">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Histórico por Setor</h1>
+        <p>Evolução mensal completa de Comunicação, Obras, Imóveis e Audiovisual. Série mensal, jan/2018 em diante.</p>
+      </div>
+      <div class="selos"><span class="portal-chip info" data-janela></span><span class="portal-chip info" id="asofHistorico"></span></div>
+    </div>
+    <div id="avisoHistVazio"></div>
+
+    <div data-setor-sec="Comunicação" class="fx-sec">
+      <div class="fx-sec-tit"><i class="fx-sq" style="background:var(--graf-3)"></i><h2 class="fx-h2">Comunicação</h2></div>
+      <div id="kpi-hist-comunicacao"></div>
+      <div class="g">
+        <div class="portal-panel c8"><div><h3 class="t">Comunicação — gastos mensais</h3><div class="s">Barras = valor do mês · linha = tendência (média móvel de 6 meses)</div></div>
+          <div class="fx-chart"><canvas id="chartHistComunicacao" role="img" aria-label="Gastos mensais de Comunicação"></canvas></div></div>
+        <div class="portal-panel c4"><div><h3 class="t">Média mensal / ano</h3></div>
+          <div class="portal-tablewrap fx-lateral"><table class="portal-table fx-r fx-sm" id="tblHistComunicacao"></table></div></div>
+      </div>
+    </div>
+
+    <div data-setor-sec="Obras" class="fx-sec">
+      <div class="fx-sec-tit"><i class="fx-sq" style="background:var(--graf-1)"></i><h2 class="fx-h2">Obras</h2></div>
+      <div id="kpi-hist-obras"></div>
+      <div class="g">
+        <div class="portal-panel c8"><div><h3 class="t">Obras — gastos mensais</h3><div class="s">Barras = valor do mês · linha = tendência (média móvel de 6 meses)</div></div>
+          <div class="fx-chart"><canvas id="chartHistObras" role="img" aria-label="Gastos mensais de Obras"></canvas></div></div>
+        <div class="portal-panel c4"><div><h3 class="t">Média mensal / ano</h3></div>
+          <div class="portal-tablewrap fx-lateral"><table class="portal-table fx-r fx-sm" id="tblHistObras"></table></div></div>
+      </div>
+    </div>
+
+    <div data-setor-sec="Imóveis" class="fx-sec">
+      <div class="fx-sec-tit"><i class="fx-sq" style="background:var(--graf-2)"></i><h2 class="fx-h2">Imóveis</h2></div>
+      <div id="kpi-hist-imoveis"></div>
+      <div class="g">
+        <div class="portal-panel c8"><div><h3 class="t">Imóveis — gastos mensais</h3><div class="s">Barras = valor do mês · linha = tendência (média móvel de 6 meses)</div></div>
+          <div class="fx-chart"><canvas id="chartHistImoveis" role="img" aria-label="Gastos mensais de Imóveis"></canvas></div></div>
+        <div class="portal-panel c4"><div><h3 class="t">Média mensal / ano</h3></div>
+          <div class="portal-tablewrap fx-lateral"><table class="portal-table fx-r fx-sm" id="tblHistImoveis"></table></div></div>
+      </div>
+    </div>
+
+    <div data-setor-sec="Audiovisual" class="fx-sec">
+      <div class="fx-sec-tit"><i class="fx-sq" style="background:var(--graf-5)"></i><h2 class="fx-h2">Audiovisual</h2></div>
+      <div id="kpi-hist-audiovisual"></div>
+      <div class="g" id="rowHistAudiovisual">
+        <div class="portal-panel c8"><div><h3 class="t">Audiovisual — gastos mensais</h3><div class="s">Barras = valor do mês · linha = tendência (média móvel de 6 meses)</div></div>
+          <div class="fx-chart"><canvas id="chartHistAudiovisual" role="img" aria-label="Gastos mensais de Audiovisual"></canvas></div></div>
+        <div class="portal-panel c4"><div><h3 class="t">Média mensal / ano</h3></div>
+          <div class="portal-tablewrap fx-lateral"><table class="portal-table fx-r fx-sm" id="tblHistAudiovisual"></table></div></div>
+      </div>
+      <div id="avisoHistAudiovisual"></div>
+    </div>
+  </div></section>
+
+</div>
+
+<script>
+(function(){
+'use strict';
+const SHELL = window.PORTAL_SHELL;
+
+let charts = [];            // instancias Chart.js ativas
+let payload = null;         // dados da ultima leitura valida (base consolidada)
+let tabelaMensalAtual = null;   // numeros da tabela "evolucao mensal por setor" (para CSV)
+let demo = null;            // linhas do demonstrativo mensal (Visao Geral)
+let stripPronta = false;
+const F = { anos:new Set(), periodo:0, setores:new Set(), busca:'', expandido:false };   // filtros globais
+const COR = {};
+
+/* ---------------- formatadores a prova de dado ausente ---------------- */
+function valido(v){ return typeof v === 'number' && isFinite(v); }
+function fmtBRL(v, casas){
+  if(!valido(v)) return '—';
+  casas = casas===undefined?0:casas;
+  return v.toLocaleString('pt-BR', {style:'currency', currency:'BRL', minimumFractionDigits:casas, maximumFractionDigits:casas});
+}
+function fmtBRLc(v){ return fmtBRL(v,2); }
+function fmtPct(v){
+  if(!valido(v)) return '—';
+  return (v>=0?'+':'') + v.toFixed(1).replace('.',',') + '%';
+}
+function moneyTick(v){
+  if(Math.abs(v) >= 1000000) return (v/1000000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + 'MM';
+  return v.toLocaleString('pt-BR');
+}
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function semAcento(t){ return String(t).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+function movingAvg(arr, w){
+  return arr.map((_,i)=>{
+    if(i < w-1) return null;
+    let s=0, n=0;
+    for(let j=i-w+1;j<=i;j++){
+      const v = arr[j];
+      if(v===null || v===undefined || isNaN(v)) continue;
+      s+=v; n++;
+    }
+    return n ? s/n : null;
+  });
+}
+function totaisPorAno(arr, anosArr){
+  const map = {};
+  arr.forEach((v,i)=>{
+    const a = anosArr[i];
+    if(!map[a]) map[a] = {soma:0, n:0};
+    map[a].soma += v; map[a].n += 1;
+  });
+  return map;
+}
+function lastYearFull(map){
+  const anos = Object.keys(map).map(Number).sort((a,b)=>a-b);
+  for(let i=anos.length-1;i>=0;i--){ if(map[anos[i]].n===12) return anos[i]; }
+  return anos[anos.length-1];
+}
+const NOMES_ABR = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const NOMES_FULL = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
+/* ---------------- filtros: janela de meses, anos e setores ---------------- */
+const anoOk = a => !F.anos.size || F.anos.has(Number(a));
+const setorOk = n => !F.setores.size || F.setores.has(n);
+/* indices (em ordem) dos itens cujo ano passa no filtro de Ano, limitados aos N ultimos do periodo rapido */
+function janela(anosDe){
+  let idx = anosDe.map((_,i)=>i).filter(i=>anoOk(anosDe[i]));
+  if(F.periodo > 0) idx = idx.slice(-F.periodo);
+  return idx;
+}
+const pick = (arr, idx) => idx.map(i=>arr[i]);
+function janelaTxt(){
+  const p = [];
+  if(F.anos.size) p.push('Ano' + (F.anos.size>1?'s':'') + ': ' + [...F.anos].sort().join(', '));
+  if(F.periodo) p.push(F.periodo===12 ? 'últimos 12 meses' : F.periodo===24 ? 'últimos 24 meses' : 'últimos 5 anos');
+  return p.length ? p.join(' · ') : 'Todo o período';
+}
+
+/* ---------------- cores (sempre lidas das variaveis do shell; redesenhadas no evento portal:tema) ---------------- */
+/* Parametros de brilho/sombra/degrade (mesmos do tema original; so as cores vem da paleta azul/branco) */
+const FX_CLARO  = { neon:false, glowLinha:8,  glowBarra:6,  glowRosca:12, glowNeutro:'rgba(20,26,46,.12)',  sombraY:3, alfaBrilho:.30, alfaBaseBarra:.38, alfaArea:.14 };
+const FX_ESCURO = { neon:true,  glowLinha:12, glowBarra:8,  glowRosca:14, glowNeutro:'rgba(90,184,255,.35)', sombraY:0, alfaBrilho:.55, alfaBaseBarra:.28, alfaArea:.30 };
+function lerCores(){
+  const c = n => SHELL.cor(n);
+  COR.pos = c('graf-pos'); COR.neg = c('graf-neg');
+  COR.g = [1,2,3,4,5,6,7,8].map(i=>c('graf-'+i));
+  COR.grade = c('graf-grade'); COR.texto = c('graf-texto');
+  COR.card = c('lowest'); COR.ink = c('on-surface');
+  COR.ttBg = c('graf-tt-bg'); COR.ttTit = c('graf-tt-titulo'); COR.ttTxt = c('graf-tt-texto');
+  COR.fx = SHELL.escuro() ? FX_ESCURO : FX_CLARO;
+}
+function hexA(hex, a){
+  if(typeof hex !== 'string' || hex[0] !== '#') return hex;
+  const h = hex.length === 4 ? hex.replace(/#(.)(.)(.)/, '#$1$1$2$2$3$3') : hex;
+  const n = parseInt(h.slice(1), 16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+function configurarChart(animar){
+  lerCores();
+  const d = Chart.defaults;
+  d.font.family = "Inter, system-ui, sans-serif";
+  d.font.size = 11;
+  d.color = COR.texto;
+  d.borderColor = COR.grade;
+  d.normalized = true;                         // dados ja ordenados: menos trabalho no parse
+  d.animation = animar ? { duration:650, easing:'easeOutQuart' } : false;
+  d.animations.colors = false;                 // degrades (CanvasGradient) nao se interpolam: evita erro do animador
+  d.elements.line.borderCapStyle = 'round';
+  d.elements.line.borderJoinStyle = 'round';
+  d.elements.point.hoverRadius = 5;
+  d.elements.point.hoverBorderWidth = 2;
+  d.scale.border.display = false;              // sem linha de eixo: so a grade tracejada
+  d.scale.border.dash = [3, 4];
+  const lg = d.plugins.legend.labels;
+  lg.usePointStyle = true; lg.pointStyle = 'rectRounded'; lg.padding = 14; lg.color = COR.texto;
+  const tt = d.plugins.tooltip;
+  tt.backgroundColor = COR.ttBg; tt.borderColor = hexA(COR.g[0], .55); tt.borderWidth = 1;
+  tt.titleColor = COR.ttTit; tt.bodyColor = COR.ttTxt;
+  tt.padding = 10; tt.cornerRadius = 8; tt.boxPadding = 4; tt.usePointStyle = true;
+  tt.titleFont = { weight:'600', size:12 };
+  tt.bodyFont = { size:11.5 };
+  tt.caretSize = 6;
+  tt.callbacks.title = (itens)=>{
+    const it = itens && itens[0];
+    if(!it) return '';
+    return ehParcial(it) ? it.chart.data.labels[it.dataIndex][0] + ' (parcial)' : it.label;
+  };
+  tt.callbacks.afterTitle = (itens)=>{
+    const it = itens && itens[0];
+    return it && ehParcial(it) ? (it.dataset.$notaParcial || 'Mês em andamento (parcial)') : '';
+  };
+  /* rotulos de dados: so as roscas os usam (cada grafico liga o seu quando precisa) */
+  if(d.plugins.datalabels) d.plugins.datalabels.display = false;
+}
+
+/* Rotulo do mes em andamento: ['set/26', 'parcial'] (duas linhas no eixo) */
+function rotuloParcial(rot){ return [rot, 'parcial']; }
+function ehParcial(c){
+  if(c.dataIndex === undefined) return false;
+  const l = c.chart.data.labels[c.dataIndex];
+  return Array.isArray(l) && l[1] === 'parcial';
+}
+/* Degrades: calculados sobre a area util do grafico e reaproveitados (cache por grafico) */
+function degrade(chart, chave, criar){
+  const a = chart.chartArea;
+  if(!a) return null;
+  const k = `${chave}|${Math.round(a.top)}|${Math.round(a.bottom)}`;
+  chart.$grad = chart.$grad || {};
+  if(!chart.$grad[k]) chart.$grad[k] = criar(chart.ctx, a);
+  return chart.$grad[k];
+}
+function degradeBarra(chart, cor, negativo){
+  const t = COR.fx;
+  return degrade(chart, `b${cor}${negativo?'-':'+'}`, (ctx, a)=>{
+    const g = negativo ? ctx.createLinearGradient(0, a.bottom, 0, a.top) : ctx.createLinearGradient(0, a.top, 0, a.bottom);
+    g.addColorStop(0, hexA(cor, 1));
+    g.addColorStop(.55, hexA(cor, t.neon ? .72 : .85));
+    g.addColorStop(1, hexA(cor, t.alfaBaseBarra));
+    return g;
+  }) || cor;
+}
+function degradeArea(chart, cor){
+  const t = COR.fx;
+  return degrade(chart, `a${cor}`, (ctx, a)=>{
+    const g = ctx.createLinearGradient(0, a.top, 0, a.bottom);
+    g.addColorStop(0, hexA(cor, t.alfaArea));
+    g.addColorStop(1, hexA(cor, 0));
+    return g;
+  }) || hexA(cor, .1);
+}
+/* Prepara cada grafico: barras com degrade (cor original em $base/$cores), mes parcial "vazado",
+   linhas com area em degrade quando marcadas com $area e destaque no ponto sob o mouse */
+function tematizar(cfg){
+  (cfg.data.datasets || []).forEach(ds=>{
+    const tipo = ds.type || cfg.type;
+    if(tipo === 'bar'){
+      if(Array.isArray(ds.backgroundColor)) ds.$cores = ds.backgroundColor.slice();
+      else if(typeof ds.backgroundColor === 'string') ds.$base = ds.backgroundColor;
+      else return;
+      const corDe = (c)=> c.dataset.$cores ? (c.dataset.$cores[c.dataIndex] || c.dataset.$cores[0]) : c.dataset.$base;
+      ds.backgroundColor = (c)=> ehParcial(c) ? hexA(corDe(c), .16)
+        : degradeBarra(c.chart, corDe(c), typeof c.raw === 'number' && c.raw < 0);
+      ds.hoverBackgroundColor = (c)=> ehParcial(c) ? hexA(corDe(c), .32) : corDe(c);
+      ds.borderColor = (c)=> corDe(c);
+      ds.borderWidth = (c)=> ehParcial(c) ? 1.6 : 0;
+      ds.borderSkipped = (c)=> ehParcial(c) ? false : 'start';
+    }
+    if(tipo === 'line'){
+      const cor = ds.borderColor;
+      ds.pointHoverBackgroundColor = cor;
+      ds.pointHoverBorderColor = COR.card;
+      if(ds.$area && typeof cor === 'string'){
+        ds.fill = 'start';
+        ds.backgroundColor = (c)=> degradeArea(c.chart, cor);
+      }
+    }
+  });
+  return cfg;
+}
+/* Brilho (escuro) / sombra (claro) desenhado por baixo de cada serie */
+const pluginFX = {
+  id:'fxPORTAL',
+  beforeDatasetDraw(chart, args){
+    const t = COR.fx, ds = chart.data.datasets[args.index], tipo = args.meta.type;
+    const cor = tipo === 'line' ? ds.borderColor : (ds.$base || null);
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.shadowColor = typeof cor === 'string' ? hexA(cor, t.alfaBrilho) : t.glowNeutro;
+    ctx.shadowBlur = tipo === 'line' ? t.glowLinha : tipo === 'doughnut' ? t.glowRosca : t.glowBarra;
+    ctx.shadowOffsetY = t.sombraY;
+  },
+  afterDatasetDraw(chart){ chart.ctx.restore(); }
+};
+function mk(id, cfg){
+  const el = document.getElementById(id);
+  if(!el) return null;
+  const c = new Chart(el, tematizar(cfg));
+  charts.push(c);
+  return c;
+}
+/* Opcoes padrao dos graficos de barras/linhas (mesmas do original: legenda no topo, tooltip em R$, eixo em MM) */
+function opcoes(o){
+  o = o || {};
+  const lab = o.soValor ? (c)=> fmtBRLc(c.parsed.y) : (c)=> c.dataset.label+': '+fmtBRLc(c.parsed.y);
+  return {
+    responsive:true, maintainAspectRatio:false,
+    interaction: o.indice ? {mode:'index', intersect:false} : undefined,
+    plugins: { legend: o.legenda===false ? {display:false} : {position:'top', labels:{boxWidth:12}},
+      tooltip:{callbacks:{label:lab}}, datalabels:{display:false} },
+    scales:{ x: Object.assign({grid:{display:false}, ticks:{maxTicksLimit:o.maxX || 16}}, o.x || {}),
+             y:{grid:{color:COR.grade}, ticks:{callback:moneyTick}} }
+  };
+}
+
+/* ---------------- KPIs ---------------- */
+const KPI_COL = {1:'c12', 2:'c6', 3:'c4', 4:'c3'};
+function sparkSVG(vals, varCor){
+  const v = (vals||[]).filter(x=> x!==null && x!==undefined && isFinite(x));
+  if(v.length < 2) return '';
+  const min = Math.min(...v), max = Math.max(...v), r = (max-min) || 1;
+  const P = v.map((y,i)=> [i/(v.length-1)*160, 34-(y-min)/r*28]);
+  let d = `M ${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+  for(let i=1;i<P.length;i++){
+    const mx = (P[i-1][0]+P[i][0])/2, my = (P[i-1][1]+P[i][1])/2;
+    d += ` Q ${P[i-1][0].toFixed(1)},${P[i-1][1].toFixed(1)} ${mx.toFixed(1)},${my.toFixed(1)}`;
+  }
+  d += ` L ${P[P.length-1][0].toFixed(1)},${P[P.length-1][1].toFixed(1)}`;
+  return `<svg class="spark" viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true" fill="none" style="color:var(${varCor || '--graf-1'})">`
+    + `<path d="${d}" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`
+    + `<path d="${d} L 160,40 L 0,40 Z" fill="currentColor" fill-opacity="0.12" stroke="none"/></svg>`;
+}
+function renderKPIs(containerId, items){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  el.className = 'g gap-4';
+  const col = KPI_COL[Math.min(items.length,4)] || 'c3';
+  el.innerHTML = items.map(it=>{
+    const chipCls = it.dir==='good' ? 'ok' : (it.dir==='bad' ? 'bad' : 'info');
+    const seta = !it.delta ? '' : (String(it.delta).charAt(0)==='+' ? 'arrow_upward' : (String(it.delta).charAt(0)==='-' ? 'arrow_downward' : ''));
+    const chip = it.delta ? `<span class="portal-chip ${chipCls}">${seta ? `<span class="material-symbols-outlined" aria-hidden="true">${seta}</span>` : ''}${esc(it.delta)}</span>` : '';
+    const tom = it.tom === 'pos' ? ' pos' : (it.tom === 'neg' ? ' neg' : '');
+    return `<div class="portal-kpi fx-kpi ${col}">
+      <div class="col gap-1">
+        <div class="topo-k" style="align-items:flex-start;flex-wrap:wrap"><span class="rotulo">${esc(it.label)}</span>${chip}</div>
+        <span class="valor num${tom}">${esc(it.value)}</span>
+        ${it.note ? `<span class="sub">${esc(it.note)}</span>` : ''}
+      </div>
+      ${it.spark ? sparkSVG(it.spark, it.sparkVar) : ''}
+    </div>`;
+  }).join('');
+}
+
+/* Zera graficos e conteudos gerados (usado a cada redesenho) */
+const IDS_LIMPAR = ['kpi-visao','kpi-entradas','kpi-saidas','kpi-fluxo','kpi-hist-comunicacao','kpi-hist-obras','kpi-hist-imoveis',
+  'kpi-hist-audiovisual','tblHistAudiovisual','avisoHistAudiovisual','avisoHistVazio','legSetores2025','legSetores2026','legSetoresMes','avisoSetoresMes',
+  'tblSetoresMensal','avisoSetoresMensal','avisoEvolucaoAudiovisual','tblEntradas','tblSaidas','tblFluxo','tblSetores',
+  'tblHistComunicacao','tblHistObras','tblHistImoveis','calloutVisao','destVisao','notaVisaoAnual','tblDemo','rodapeDemo'];
+function limpar(){
+  charts.forEach(c=>{ try{ c.destroy(); }catch(e){} });
+  charts = [];
+  tabelaMensalAtual = null; demo = null;
+  document.querySelectorAll('.fx-nota').forEach(n=>n.remove());
+  const cont = document.getElementById('contagemSetoresMensal'); if(cont) cont.textContent = '';
+  IDS_LIMPAR.forEach(id=>{ const el = document.getElementById(id); if(el) el.innerHTML = ''; });
+}
+
+/* ======================================================================
+   MONTAGEM DO DASHBOARD (usa os filtros atuais; os numeros nunca mudam)
+====================================================================== */
+function initApp(data){
+  const mesesLabel = [], anosArr = [], mesesIdx = [];
+  let ano = data.dataInicio.ano, mes = data.dataInicio.mes;
+  for(let i=0;i<data.nMeses;i++){
+    mesesLabel.push(NOMES_ABR[mes] + '/' + String(ano).slice(2));
+    anosArr.push(ano); mesesIdx.push(mes);
+    mes++; if(mes>11){mes=0; ano++;}
+  }
+  const entradas = data.entradas;
+  const saidas = data.saidas;
+  const fluxo = entradas.map((v,i)=> v - saidas[i]);
+  const entAno = totaisPorAno(entradas, anosArr);
+  const saiAno = totaisPorAno(saidas, anosArr);
+  const fluAno = totaisPorAno(fluxo, anosArr);
+  const anosUnicos = Object.keys(entAno).map(Number);
+  const anosVis = anosUnicos.filter(anoOk);
+  const setores2025 = data.setores2025;
+  const setores2026 = data.setores2026;
+  const setorEvolucao = data.setorEvolucao;
+
+  /* Mes em andamento: exibido a parte (barra vazada / coluna "parcial").
+     Nao entra em nenhuma media, total anual, KPI ou variacao. */
+  const parcial = data.parcial || null;
+  const parcialSet = data.parcialSetores || null;
+  const notaAte = (ate)=> 'Mês em andamento — dados até ' + (ate || 'o último lançamento');
+  function serieComParcial(labels, anos, serie, valor, ate){
+    const tem = parcial && valido(valor);
+    return {
+      labels: tem ? labels.concat([rotuloParcial(parcial.rotulo)]) : labels,
+      anos:   tem ? anos.concat([parcial.ano]) : anos,
+      dados:  tem ? serie.concat([valor]) : serie,
+      tend:   (serieTend)=> tem ? serieTend.concat([null]) : serieTend,
+      nota:   tem ? notaAte(ate) : null
+    };
+  }
+  function notaNoGrafico(canvasId, texto){
+    const el = document.getElementById(canvasId);
+    const card = el && el.closest('.portal-panel');
+    if(!card || !texto) return;
+    const alvo = card.querySelector('.s') || card;
+    const n = document.createElement('p');
+    n.className = 'fx-nota';
+    n.innerHTML = '<i></i>' + esc(texto).replace('Mês em andamento', 'Barra vazada = mês em andamento (parcial)');
+    alvo.insertAdjacentElement('afterend', n);
+  }
+  const pEnt = serieComParcial(mesesLabel, anosArr, entradas, parcial && parcial.entradas, parcial && parcial.ateEntradas);
+  const pSai = serieComParcial(mesesLabel, anosArr, saidas, parcial && parcial.saidas, parcial && parcial.ateSaidas);
+  const temFluxoParcial = parcial && valido(parcial.entradas) && valido(parcial.saidas);
+  const pFlu = serieComParcial(mesesLabel, anosArr, fluxo, temFluxoParcial ? parcial.entradas - parcial.saidas : null,
+    temFluxoParcial ? [parcial.ateEntradas, parcial.ateSaidas].filter(Boolean).sort().slice(0,1)[0] : null);
+
+  const asofTxt = `Dados até ${data.atualizadoAte}`
+    + (parcial ? ` · ${parcial.rotulo} em andamento (parcial${parcial.ateEntradas ? ', até ' + parcial.ateEntradas : ''})` : '')
+    + ` · valores em R$ · MM = milhões`;
+  document.querySelectorAll('[data-asof]').forEach(e=>{ e.textContent = asofTxt; });
+  document.querySelectorAll('[data-janela]').forEach(e=>{ e.textContent = janelaTxt(); });
+  const asofSetoresEl = document.getElementById('asofSetores');
+  if(asofSetoresEl) asofSetoresEl.textContent = `Dados de setores atualizados até ${data.atualizadoAteSetores}`;
+  const asofHistoricoEl = document.getElementById('asofHistorico');
+  if(asofHistoricoEl) asofHistoricoEl.textContent = `Dados atualizados até ${data.atualizadoAteSetores}`;
+
+  /* ---------- KPIs (calculados sobre a base completa, sem filtros) ---------- */
+  const anoCompleto = lastYearFull(entAno);
+  const entMediaCompleto = entAno[anoCompleto].soma/entAno[anoCompleto].n;
+  const entMediaAnterior = entAno[anoCompleto-1].soma/entAno[anoCompleto-1].n;
+  const entVar = (entMediaCompleto/entMediaAnterior - 1)*100;
+  const saiMediaCompleto = saiAno[anoCompleto].soma/saiAno[anoCompleto].n;
+  const saiMediaAnterior = saiAno[anoCompleto-1].soma/saiAno[anoCompleto-1].n;
+  const saiVar = (saiMediaCompleto/saiMediaAnterior - 1)*100;
+  const fluTotalCompleto = fluAno[anoCompleto].soma;
+  const fluTotalAnterior = fluAno[anoCompleto-1].soma;
+  const fluVar = (fluTotalCompleto/fluTotalAnterior - 1)*100;
+
+  const ultimoIdx = fluxo.length-1;
+  const fluUltimoMes = fluxo[ultimoIdx];
+  const fluPenultimoMes = fluxo[ultimoIdx-1];
+  const fluUltimoVar = fluPenultimoMes !== 0 ? ((fluUltimoMes/fluPenultimoMes) - 1)*100 : null;
+  const fluUltimoDeltaR = fluUltimoMes - fluPenultimoMes;
+
+  /* Callout "ponto de atencao" (frase executiva real) */
+  document.getElementById('calloutVisao').innerHTML =
+    `<div class="portal-callout warn" role="note">
+      <div class="row top gap-3 grow">
+        <div class="ic"><span class="material-symbols-outlined" aria-hidden="true">warning</span></div>
+        <div class="col grow"><span class="tt">Ponto de atenção</span>
+          <p>O resultado operacional de ${anoCompleto} foi <b class="num">${fmtBRL(fluTotalCompleto)}</b> (${fmtPct(fluVar)} vs. ${anoCompleto-1}). O último mês com dado disponível (${mesesLabel[ultimoIdx]}) fechou em <b class="num">${fmtBRL(fluUltimoMes)}</b>.</p></div>
+      </div>
+      <span class="fx-callout-tag">Exercício ${anoCompleto}</span>
+    </div>`;
+
+  const anoAtual = anosArr[ultimoIdx];
+  const resultadoAcumuladoAtual = fluAno[anoAtual].soma;
+  const entUltimoMes = entradas[ultimoIdx], entPenultimoMes = entradas[ultimoIdx-1];
+  const entUltimoVar = (entUltimoMes/entPenultimoMes - 1)*100;
+  const saiUltimoMes = saidas[ultimoIdx], saiPenultimoMes = saidas[ultimoIdx-1];
+  const saiUltimoVar = (saiUltimoMes/saiPenultimoMes - 1)*100;
+  const varPos = v => v>=0 ? '--graf-pos' : '--graf-neg';
+
+  renderKPIs('kpi-visao', [
+    {label:'Última entrada mensal', value:fmtBRL(entUltimoMes), delta:fmtPct(entUltimoVar), dir: entUltimoVar>=0?'good':'bad', note: mesesLabel[ultimoIdx], spark: entradas.slice(-12), sparkVar:'--graf-pos'},
+    {label:'Última saída mensal', value:fmtBRL(saiUltimoMes), delta:fmtPct(saiUltimoVar), dir: saiUltimoVar<=0?'good':'bad', note: mesesLabel[ultimoIdx], spark: saidas.slice(-12), sparkVar:'--graf-neg'},
+    {
+      label:'Fluxo de caixa', value:fmtBRL(fluUltimoMes), tom: fluUltimoMes>=0?'pos':'neg',
+      delta: fluUltimoVar!==null ? `${fmtPct(fluUltimoVar)} (${fmtBRL(fluUltimoDeltaR)})` : mesesLabel[ultimoIdx],
+      dir: fluUltimoDeltaR>=0 ? 'good' : 'bad',
+      note: `${mesesLabel[ultimoIdx]} vs. ${mesesLabel[ultimoIdx-1]}`,
+      spark: fluxo.slice(-12), sparkVar: varPos(fluUltimoMes)
+    },
+    {label:`Resultado operacional acumulado ${anoAtual}`, value:fmtBRL(resultadoAcumuladoAtual), tom: resultadoAcumuladoAtual>=0?'pos':'neg',
+      dir: resultadoAcumuladoAtual>=0?'good':'bad', note:`${fluAno[anoAtual].n} meses`,
+      spark: (()=>{ let acc=0; return fluxo.filter((_,i)=>anosArr[i]===anoAtual).map(v=> acc+=v); })(),
+      sparkVar: varPos(resultadoAcumuladoAtual)},
+  ]);
+
+  // Comparativo a media do MESMO mes-calendario nos ultimos 3 anos (excluindo o proprio mes)
+  function mediaMesmoMesUltimosAnos(arr, idx, nAnos){
+    const valores = [];
+    for(let i=idx-12; i>=0 && valores.length<nAnos; i-=12){ valores.push(arr[i]); }
+    return valores.length ? {media: valores.reduce((a,b)=>a+b,0)/valores.length, n: valores.length} : null;
+  }
+  const entVsMedia3anos = mediaMesmoMesUltimosAnos(entradas, ultimoIdx, 3);
+  const entMediaAno2026 = entAno[anoAtual].soma/entAno[anoAtual].n;
+  const entPenultimoVsMedia = mediaMesmoMesUltimosAnos(entradas, ultimoIdx-1, 3);
+
+  renderKPIs('kpi-entradas', [
+    {
+      label:'Última entrada mensal', value:fmtBRL(entUltimoMes),
+      delta: entVsMedia3anos ? fmtPct((entUltimoMes/entVsMedia3anos.media - 1)*100) : fmtPct(entUltimoVar),
+      dir: (entVsMedia3anos ? (entUltimoMes/entVsMedia3anos.media - 1)*100 : entUltimoVar) >=0 ? 'good' : 'bad',
+      note: entVsMedia3anos ? `vs. média de ${mesesLabel[ultimoIdx].split('/')[0]} (últ. ${entVsMedia3anos.n} anos) · ${mesesLabel[ultimoIdx]}` : mesesLabel[ultimoIdx]
+    },
+    {label:`Média mensal ${anoAtual}`, value:fmtBRL(entMediaAno2026), delta:fmtPct(entVar), dir: entVar>=0?'good':'bad', note:`vs. média ${anoCompleto}`},
+    {
+      label:'Penúltima entrada mensal', value:fmtBRL(entPenultimoMes),
+      delta: entPenultimoVsMedia ? fmtPct((entPenultimoMes/entPenultimoVsMedia.media - 1)*100) : '—',
+      dir: entPenultimoVsMedia ? ((entPenultimoMes/entPenultimoVsMedia.media - 1)*100 >=0 ? 'good':'bad') : '',
+      note: entPenultimoVsMedia ? `vs. média de ${mesesLabel[ultimoIdx-1].split('/')[0]} (últ. ${entPenultimoVsMedia.n} anos) · ${mesesLabel[ultimoIdx-1]}` : mesesLabel[ultimoIdx-1]
+    },
+  ]);
+
+  const saiVsMedia3anos = mediaMesmoMesUltimosAnos(saidas, ultimoIdx, 3);
+  const saiMediaAno2026 = saiAno[anoAtual].soma/saiAno[anoAtual].n;
+  const saiPenultimoVsMedia = mediaMesmoMesUltimosAnos(saidas, ultimoIdx-1, 3);
+
+  renderKPIs('kpi-saidas', [
+    {
+      label:'Última saída mensal', value:fmtBRL(saiUltimoMes),
+      delta: saiVsMedia3anos ? fmtPct((saiUltimoMes/saiVsMedia3anos.media - 1)*100) : fmtPct(saiUltimoVar),
+      dir: (saiVsMedia3anos ? (saiUltimoMes/saiVsMedia3anos.media - 1)*100 : saiUltimoVar) <=0 ? 'good' : 'bad',
+      note: saiVsMedia3anos ? `vs. média de ${mesesLabel[ultimoIdx].split('/')[0]} (últ. ${saiVsMedia3anos.n} anos) · ${mesesLabel[ultimoIdx]}` : mesesLabel[ultimoIdx]
+    },
+    {label:`Média mensal ${anoAtual}`, value:fmtBRL(saiMediaAno2026), delta:fmtPct(saiVar), dir: saiVar<=0?'good':'bad', note:`vs. média ${anoCompleto}`},
+    {
+      label:'Penúltima saída mensal', value:fmtBRL(saiPenultimoMes),
+      delta: saiPenultimoVsMedia ? fmtPct((saiPenultimoMes/saiPenultimoVsMedia.media - 1)*100) : '—',
+      dir: saiPenultimoVsMedia ? ((saiPenultimoMes/saiPenultimoVsMedia.media - 1)*100 <=0 ? 'good':'bad') : '',
+      note: saiPenultimoVsMedia ? `vs. média de ${mesesLabel[ultimoIdx-1].split('/')[0]} (últ. ${saiPenultimoVsMedia.n} anos) · ${mesesLabel[ultimoIdx-1]}` : mesesLabel[ultimoIdx-1]
+    },
+  ]);
+
+  const mesesNegativos = fluxo.filter(v=>v<0).length;
+  const fluMediaAno2026 = fluAno[anoAtual].soma/fluAno[anoAtual].n;
+  renderKPIs('kpi-fluxo', [
+    {
+      label:'Fluxo — último mês', value:fmtBRL(fluUltimoMes), tom: fluUltimoMes>=0?'pos':'neg',
+      delta: fluUltimoVar!==null ? fmtPct(fluUltimoVar) : '—', dir: fluUltimoDeltaR>=0?'good':'bad',
+      note:`${mesesLabel[ultimoIdx]} vs. ${mesesLabel[ultimoIdx-1]}`
+    },
+    {label:`Média mensal ${anoAtual}`, value:fmtBRL(fluMediaAno2026), tom: fluMediaAno2026>=0?'pos':'neg', dir: fluMediaAno2026>=0?'good':'bad', note:`${fluAno[anoAtual].n} meses`},
+    {label:`Resultado ${anoCompleto}`, value:fmtBRL(fluTotalCompleto), tom: fluTotalCompleto>=0?'pos':'neg', delta:fmtPct(fluVar), dir: fluVar>=0?'good':'bad', note:`vs. ${anoCompleto-1}`},
+    {label:'Meses com déficit', value:`${mesesNegativos} de ${fluxo.length}`, note:`${(mesesNegativos/fluxo.length*100).toFixed(0)}% do período`},
+  ]);
+
+  /* ---------- Visão Geral: gráficos ---------- */
+  document.getElementById('destVisao').innerHTML =
+    [['Entradas · '+mesesLabel[ultimoIdx], fmtBRL(entUltimoMes), 'pos'], ['Saídas · '+mesesLabel[ultimoIdx], fmtBRL(saiUltimoMes), 'neg'],
+     ['Líquido · '+mesesLabel[ultimoIdx], fmtBRL(fluUltimoMes), fluUltimoMes>=0?'pos':'neg']]
+    .map(x=>`<div><span class="l">${esc(x[0])}</span><span class="v num ${x[2]}">${esc(x[1])}</span></div>`).join('');
+
+  const jV = janela(anosArr);
+  mk('chartVisaoLinhas', {
+    type:'line',
+    data:{
+      labels: pick(mesesLabel, jV),
+      datasets:[
+        {label:'Entradas', data: pick(entradas,jV), borderColor:COR.pos, $area:true, borderWidth:2.5, pointRadius:0, tension:.3},
+        {label:'Saídas', data: pick(saidas,jV), borderColor:COR.neg, $area:true, borderWidth:2.5, pointRadius:0, tension:.3},
+      ]
+    },
+    options: opcoes({indice:true, maxX:14})
+  });
+
+  document.getElementById('chipAnosVisao').textContent = anosVis.length + (anosVis.length===1 ? ' ano' : ' anos');
+  const parc = anosVis.filter(a=>fluAno[a].n<12);
+  document.getElementById('notaVisaoAnual').innerHTML = parc.length
+    ? `<span class="fx-nota-anual"><i></i>${parc.map(a=>`${a}: parcial (${fluAno[a].n} meses)`).join(' · ')}</span>` : '';
+  mk('chartVisaoAnual', {
+    type:'bar',
+    data:{
+      labels: anosVis.map(String),
+      datasets:[{
+        label:'Resultado operacional anual',
+        data: anosVis.map(a=>fluAno[a].soma),
+        backgroundColor: anosVis.map(a=> fluAno[a].soma>=0 ? COR.pos : COR.neg),
+        borderRadius:2,
+      }]
+    },
+    options: opcoes({legenda:false, soValor:true})
+  });
+
+  const s26 = setores2026.filter(s=>setorOk(s.nome));
+  mk('chartVisaoSetores', {
+    type:'bar',
+    data:{
+      labels: s26.map(s=>s.nome),
+      datasets:[
+        {label:'2025', data: s26.map(s=>{ const f=setores2025.find(x=>x.nome===s.nome); return f?f.valor:0; }), backgroundColor: COR.g[3], borderRadius:2},
+        {label:'2026', data: s26.map(s=>s.valor), backgroundColor: COR.g[0], borderRadius:2},
+      ]
+    },
+    options: opcoes({x:{ticks:{maxRotation:40, minRotation:0, autoSkip:false, font:{size:10}}}})
+  });
+
+  /* ---------- Entradas ---------- */
+  const jE = janela(pEnt.anos);
+  mk('chartEntradasMensal', {
+    data:{ labels: pick(pEnt.labels,jE), datasets:[
+      {type:'bar', label:'Entradas', data: pick(pEnt.dados,jE), backgroundColor: COR.pos, borderRadius:1, barPercentage:.9, categoryPercentage:.9, order:2, $notaParcial: pEnt.nota},
+      {type:'line', label:'Tendência (média 6m)', data: pick(pEnt.tend(movingAvg(entradas,6)),jE), borderColor: COR.g[0], backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:.25, order:1},
+    ]},
+    options: opcoes({})
+  });
+  notaNoGrafico('chartEntradasMensal', pEnt.nota);
+  mk('chartEntradasAnual', {
+    type:'bar',
+    data:{ labels: anosVis.map(String), datasets:[{ label:'Média mensal', data: anosVis.map(a=>entAno[a].soma/entAno[a].n), backgroundColor: COR.pos, borderRadius:2 }] },
+    options: opcoes({legenda:false, soValor:true})
+  });
+  // Media historica por mes-calendario (jan, fev, mar... considerando todos os anos)
+  const nomesMes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  function mediaPorMesCalendario(arr){
+    const soma = new Array(12).fill(0), n = new Array(12).fill(0);
+    arr.forEach((v,i)=>{ const m = i % 12; soma[m]+=v; n[m]+=1; });
+    return soma.map((s,i)=> s/n[i]);
+  }
+  mk('chartEntradasMediaMes', {
+    type:'bar',
+    data:{ labels: nomesMes, datasets:[{ label:'Média histórica', data: mediaPorMesCalendario(entradas), backgroundColor: COR.pos, borderRadius:2 }] },
+    options: opcoes({legenda:false, soValor:true})
+  });
+
+  function fillTable(tblId, mapa, corLogica){
+    const el = document.getElementById(tblId);
+    let prev = null;
+    const rows = [];
+    anosUnicos.forEach(a=>{
+      const media = mapa[a].soma/mapa[a].n;
+      let variacao = '—';
+      if(prev!==null){
+        const pct = (media/prev - 1)*100;
+        variacao = `<span class="${corLogica(pct)}">${fmtPct(pct)}</span>`;
+      }
+      prev = media;
+      if(anoOk(a)) rows.push(`<tr><td>${a}${mapa[a].n<12?' (parcial, '+mapa[a].n+' meses)':''}</td><td>${fmtBRLc(media)}</td><td>${variacao}</td></tr>`);
+    });
+    el.innerHTML = `<thead><tr><th>Ano</th><th>Média mensal</th><th>Variação</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  }
+  // Entradas: aumento = bom (verde), reducao = ruim (rosa)
+  fillTable('tblEntradas', entAno, (pct)=> pct>=0 ? 'pos' : 'neg');
+  // Saidas: logica invertida, aumento de gasto = ruim (rosa), reducao = bom (verde)
+  fillTable('tblSaidas', saiAno, (pct)=> pct>=0 ? 'neg' : 'pos');
+
+  /* ---------- Saídas ---------- */
+  const jS = janela(pSai.anos);
+  mk('chartSaidasMensal', {
+    data:{ labels: pick(pSai.labels,jS), datasets:[
+      {type:'bar', label:'Saídas', data: pick(pSai.dados,jS), backgroundColor: COR.neg, borderRadius:1, barPercentage:.9, categoryPercentage:.9, order:2, $notaParcial: pSai.nota},
+      {type:'line', label:'Tendência (média 6m)', data: pick(pSai.tend(movingAvg(saidas,6)),jS), borderColor: COR.g[0], backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:.25, order:1},
+    ]},
+    options: opcoes({})
+  });
+  notaNoGrafico('chartSaidasMensal', pSai.nota);
+  mk('chartSaidasAnual', {
+    type:'bar',
+    data:{ labels: anosVis.map(String), datasets:[{ label:'Média mensal', data: anosVis.map(a=>saiAno[a].soma/saiAno[a].n), backgroundColor: COR.neg, borderRadius:2 }] },
+    options: opcoes({legenda:false, soValor:true})
+  });
+  mk('chartSaidasMediaMes', {
+    type:'bar',
+    data:{ labels: nomesMes, datasets:[{ label:'Média histórica', data: mediaPorMesCalendario(saidas), backgroundColor: COR.neg, borderRadius:2 }] },
+    options: opcoes({legenda:false, soValor:true})
+  });
+
+  /* ---------- Fluxo de caixa ---------- */
+  const jF = janela(pFlu.anos);
+  const dadosFluJ = pick(pFlu.dados,jF);
+  mk('chartFluxoMensal', {
+    data:{ labels: pick(pFlu.labels,jF), datasets:[
+      {type:'bar', label:'Fluxo de caixa', data: dadosFluJ, backgroundColor: dadosFluJ.map(v=> v>=0 ? COR.pos : COR.neg), borderRadius:1, barPercentage:.9, categoryPercentage:.9, order:2, $notaParcial: pFlu.nota},
+      {type:'line', label:'Tendência (média 6m)', data: pick(pFlu.tend(movingAvg(fluxo,6)),jF), borderColor: COR.g[0], backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:.25, order:1},
+    ]},
+    options: opcoes({})
+  });
+  notaNoGrafico('chartFluxoMensal', pFlu.nota);
+  mk('chartFluxoAnual', {
+    type:'bar',
+    data:{ labels: anosVis.map(String), datasets:[{ label:'Resultado', data: anosVis.map(a=>fluAno[a].soma), backgroundColor: anosVis.map(a=>fluAno[a].soma>=0?COR.pos:COR.neg), borderRadius:2 }] },
+    options: opcoes({legenda:false, soValor:true})
+  });
+
+  // Tabela do Fluxo de Caixa: 5 casos conforme sinal, ano a ano
+  // 1) positivo -> positivo: aumentou = bom / diminuiu = ruim
+  // 2) negativo -> negativo: deficit encolheu = bom / deficit cresceu = ruim
+  // 3) negativo -> positivo: sempre bom (saiu do deficit)
+  // 4) positivo -> negativo: sempre ruim (entrou em deficit)
+  // 5) variacao ~0 (< 0,5%): neutro, sem qualificar como bom/ruim
+  (function fillFluxoTable(){
+    const el = document.getElementById('tblFluxo');
+    let prev = null;
+    const rows = [];
+    anosUnicos.forEach(a=>{
+      const total = fluAno[a].soma;
+      let variacao = '—';
+      if(prev!==null){
+        const diff = total - prev;
+        const pctBase = Math.abs(prev) > 0.01 ? (diff/Math.abs(prev))*100 : (total===0?0:100);
+        let cls;
+        if(Math.abs(pctBase) < 0.5) cls = 'muted';
+        else if(prev < 0 && total >= 0) cls = 'pos';
+        else if(prev >= 0 && total < 0) cls = 'neg';
+        else if(prev >= 0 && total >= 0) cls = total >= prev ? 'pos' : 'neg';
+        else cls = total >= prev ? 'pos' : 'neg';
+        variacao = `<span class="${cls}">${fmtPct(pctBase)}</span>`;
+      }
+      prev = total;
+      if(!anoOk(a)) return;
+      const status = total>=0 ? '<span class="portal-chip ok">Superávit</span>' : '<span class="portal-chip bad">Déficit</span>';
+      rows.push(`<tr><td>${a}${fluAno[a].n<12?' (parcial)':''}</td><td>${fmtBRL(entAno[a].soma,0)}</td><td>${fmtBRL(saiAno[a].soma,0)}</td>`
+        + `<td class="${total>=0?'pos':'neg'}">${fmtBRLc(total)}</td><td class="c">${status}</td><td>${variacao}</td></tr>`);
+    });
+    el.innerHTML = `<thead><tr><th>Ano</th><th>Entradas</th><th>Saídas</th><th>Resultado</th><th class="c">Status</th><th>Variação</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  })();
+
+  /* ---------- Demonstrativo mensal (Visão Geral) ---------- */
+  (function montaDemonstrativo(){
+    const linhas = mesesLabel.map((rot,i)=>({ rot, ano:anosArr[i], mes:mesesIdx[i], ent:entradas[i], sai:saidas[i], parcial:false }));
+    if(temFluxoParcial) linhas.push({ rot:parcial.rotulo, ano:parcial.ano, mes:parcial.mes, ent:parcial.entradas, sai:parcial.saidas, parcial:true, ate:pFlu.nota });
+    demo = { linhas };
+    renderDemonstrativo();
+  })();
+
+  /* ---------- Setores ---------- */
+  const setorMensalTodos = data.setorMensalTodos || null;
+  const setorUltimoMes   = data.setorUltimoMes   || null;
+  const ordenarSetores = (list) => list.slice().sort((a,b)=> b.valor - a.valor);
+  // 8 tons de azul; do 9o setor em diante repete o tom com transparencia
+  const corFatia = i => hexA(COR.g[i % COR.g.length], i < COR.g.length ? 1 : .55);
+  function corSobre(hex){
+    const r=parseInt(hex.substr(1,2),16), g=parseInt(hex.substr(3,2),16), b=parseInt(hex.substr(5,2),16);
+    return (0.299*r + 0.587*g + 0.114*b) > 150 ? '#0B1B44' : '#FFFFFF';
+  }
+  const pluginTotalCentro = {
+    id:'pluginTotalCentro',
+    afterDatasetsDraw(chart){
+      const area = chart.chartArea;
+      if(!area) return;
+      const total = chart.data.datasets[0].data.reduce((s,v)=>s+v,0);
+      const cx = (area.left+area.right)/2, cy = (area.top+area.bottom)/2;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle=COR.texto;
+      ctx.font="600 9px Inter, sans-serif";
+      ctx.fillText('TOTAL', cx, cy-13);
+      ctx.fillStyle=COR.ink;
+      if(COR.fx.neon){ ctx.shadowColor = hexA(COR.g[0], .6); ctx.shadowBlur = 10; }
+      ctx.font="600 14px Inter, sans-serif";
+      ctx.fillText(fmtBRL(total,0), cx, cy+4);
+      ctx.restore();
+    }
+  };
+  function doughnutOptions(list){
+    const total = list.reduce((s,x)=>s+x.valor,0);
+    return {
+      responsive:true, maintainAspectRatio:false, cutout:'62%', layout:{ padding:4 },
+      plugins:{
+        legend:{ display:false },
+        tooltip:{ callbacks:{ label:(c)=> c.label+': '+fmtBRLc(c.parsed)+'  ('+(c.parsed/total*100).toFixed(1).replace('.',',')+'%)' } },
+        datalabels:{
+          font:{ size:12, weight:'600' },
+          color:(ctx)=> corSobre(COR.g[ctx.dataIndex % COR.g.length]),
+          anchor:'center', align:'center',
+          display:(ctx)=> (ctx.dataset.data[ctx.dataIndex]/total*100) >= 3.5,
+          formatter:(v)=> (v/total*100).toFixed(1).replace('.',',')+'%'
+        }
+      }
+    };
+  }
+  function renderDonutLegend(elId, list){
+    const el = document.getElementById(elId);
+    if(!el) return;
+    const total = list.reduce((s,x)=>s+x.valor,0);
+    const linhas = list.map((s,i)=>{
+      const pct = total ? (s.valor/total*100).toFixed(1).replace('.',',') : '—';
+      return `<li>
+        <span class="rk">${i+1}</span>
+        <span class="chip" style="background:${corFatia(i)}"></span>
+        <span class="nm" title="${esc(s.nome)}">${esc(s.nome)}</span>
+        <span class="vl">${fmtBRLc(s.valor)}<span class="pc">${pct}%</span></span>
+      </li>`;
+    }).join('');
+    el.innerHTML = linhas + `<li class="tot"><span class="rk"></span><span></span><span class="nm">Total</span><span class="vl">${fmtBRLc(total)}</span></li>`;
+  }
+  function donut(canvasId, legendaId, list){
+    const ordenada = ordenarSetores(list);
+    mk(canvasId, {
+      type:'doughnut',
+      data:{ labels: ordenada.map(s=>s.nome), datasets:[{
+        data: ordenada.map(s=>s.valor),
+        backgroundColor: ordenada.map((_,i)=> corFatia(i)),
+        borderColor:COR.card, borderWidth:2, hoverOffset:8, borderRadius:3
+      }]},
+      options: doughnutOptions(ordenada),
+      plugins: window.ChartDataLabels ? [pluginTotalCentro, window.ChartDataLabels] : [pluginTotalCentro]
+    });
+    renderDonutLegend(legendaId, ordenada);
+    return ordenada;
+  }
+
+  const totalSetores2025 = setores2025.reduce((s,x)=>s+x.valor,0);
+  const totalSetores2026 = setores2026.reduce((s,x)=>s+x.valor,0);
+  const setoresVar = (totalSetores2026/totalSetores2025 - 1)*100;
+  document.getElementById('hintSetores2025').textContent = `Média mensal · total ${fmtBRLc(totalSetores2025)}`;
+  document.getElementById('hintSetores2026').textContent = `Média mensal · total ${fmtBRLc(totalSetores2026)} (${fmtPct(setoresVar)} vs. 2025)`;
+  donut('chartSetores2025', 'legSetores2025', setores2025);
+  donut('chartSetores2026', 'legSetores2026', setores2026);
+
+  (function donutUltimoMes(){
+    const wrap   = document.getElementById('wrapSetoresMes');
+    const aviso  = document.getElementById('avisoSetoresMes');
+    const titulo = document.getElementById('tituloSetoresMes');
+    const hint   = document.getElementById('hintSetoresMes');
+    wrap.style.display = '';
+    hint.style.display = '';
+    if(!setorUltimoMes || !Array.isArray(setorUltimoMes.setores) || !setorUltimoMes.setores.length){
+      wrap.style.display = 'none';
+      hint.style.display = 'none';
+      titulo.textContent = `Composição de gastos — ${data.atualizadoAteSetores}`;
+      aviso.innerHTML = `<div class="fx-aviso">
+        <b>Dado ainda não carregado.</b><br>
+        Esta rosca mostra a distribuição por setor <b>do mês fechado</b> (não da média do ano).
+        Isso exige o rateio mensal por departamento, que vem do arquivo
+        <code>Saídas &lt;ANO&gt;.xlsx</code>.<br><br>
+        Rode <code>python atualizar_dashboard.py --recalcular-setores</code> na máquina
+        onde o <code>S:\\</code> está mapeado e o gráfico aparece automaticamente.
+      </div>`;
+      return;
+    }
+    titulo.textContent = `Composição de gastos — ${setorUltimoMes.rotulo}`;
+    const totalMes = setorUltimoMes.setores.reduce((s,x)=>s+x.valor,0);
+    hint.textContent = `Mês fechado · total ${fmtBRLc(totalMes)}`;
+    donut('chartSetoresMes', 'legSetoresMes', setorUltimoMes.setores);
+  })();
+
+  /* Cores de cada setor (so tons de azul/ciano) */
+  const COR_SETOR = { 'Obras':COR.g[0], 'Imóveis':COR.g[1], 'Comunicação':COR.g[2], 'Audiovisual':COR.g[4] };
+
+  (function evolucaoSetores(){
+    const ordem = ['Obras','Imóveis','Comunicação','Audiovisual'];
+    const presentes = ordem.filter(n => Array.isArray(setorEvolucao[n]) && setorEvolucao[n].some(v=>v!==null&&v!==undefined));
+    const exibidos = presentes.filter(setorOk);
+    document.getElementById('tituloEvolucaoSetores').textContent =
+      exibidos.length > 1 ? 'Evolução — ' + exibidos.slice(0,-1).join(', ') + ' e ' + exibidos[exibidos.length-1]
+      : exibidos.length ? 'Evolução — ' + exibidos[0]
+      : presentes.length ? 'Evolução — nenhum dos setores selecionados tem série anual'
+      : 'Evolução por setor (sem dados de setores na base)';
+    mk('chartSetoresEvolucao', {
+      type:'line',
+      data:{
+        labels: setorEvolucao.labels,
+        datasets: exibidos.map(n=>({
+          label:n, data:setorEvolucao[n], borderColor:COR_SETOR[n], $area:true,
+          borderWidth:2.5, tension:.3, spanGaps:true,
+          pointRadius:3.5, pointBackgroundColor:COR.card, pointBorderColor:COR_SETOR[n], pointBorderWidth:2
+        }))
+      },
+      options: opcoes({})
+    });
+    if(presentes.indexOf('Audiovisual') === -1){
+      document.getElementById('avisoEvolucaoAudiovisual').innerHTML = `<div class="fx-aviso">
+        <b>Audiovisual ainda não incluído.</b> A série anual de Audiovisual (2022–2026) precisa ser
+        apurada nos arquivos <code>Saídas &lt;ANO&gt;.xlsx</code> de cada ano — ela não existe nas
+        três planilhas dedicadas de Obras/Imóveis/Comunicação.<br>
+        Rode <code>python atualizar_dashboard.py --recalcular-setores</code> para preenchê-la.
+      </div>`;
+    }
+  })();
+
+  (function fillSetoresTable(){
+    const el = document.getElementById('tblSetores');
+    const comp = data.setoresCompleto || null;
+    const lista2025 = (comp && comp['2025']) || setores2025;
+    const lista2026 = (comp && comp['2026']) || setores2026;
+    const nomes = Array.from(new Set([...lista2025.map(s=>s.nome), ...lista2026.map(s=>s.nome)])).filter(setorOk);
+    const rows = nomes.map(n=>{
+      const v25 = lista2025.find(s=>s.nome===n);
+      const v26 = lista2026.find(s=>s.nome===n);
+      const a = v25?v25.valor:0, b = v26?v26.valor:0;
+      let variacao = '—';
+      if(a>0 && b>0){
+        const pct = (b/a - 1)*100;
+        variacao = `<span class="${pct>=0?'neg':'pos'}">${fmtPct(pct)}</span>`;
+      }
+      return {a, b, html:`<tr><td>${esc(n)}</td><td>${a?fmtBRLc(a):'—'}</td><td>${b?fmtBRLc(b):'—'}</td><td>${variacao}</td></tr>`};
+    });
+    rows.sort((x,y)=> (y.b||y.a) - (x.b||x.a));
+    el.innerHTML = `<thead><tr><th>Setor</th><th>2025</th><th>2026</th><th>Variação</th></tr></thead><tbody>${rows.map(r=>r.html).join('')}</tbody>`;
+  })();
+
+  /* ---------- Tabela: evolução mensal por setor (ano corrente) ---------- */
+  (function tabelaSetoresMensal(){
+    const tbl   = document.getElementById('tblSetoresMensal');
+    const aviso = document.getElementById('avisoSetoresMensal');
+    const hint  = document.getElementById('hintSetoresMensal');
+    const scroll = document.getElementById('scrollSetoresMensal');
+    const anoAlvo = parseInt(data.atualizadoAteSetores.split('/')[1], 10);
+    document.getElementById('tituloSetoresMensal').textContent = `Tabela — evolução mensal por setor (${anoAlvo})`;
+    scroll.style.display = '';
+    hint.style.display = '';
+
+    if(!setorMensalTodos || !setorMensalTodos.series){
+      scroll.style.display = 'none';
+      hint.style.display = 'none';
+      aviso.innerHTML = `<div class="fx-aviso">
+        <b>Dado ainda não carregado.</b><br>
+        Esta tabela abre o gasto de <b>cada setor mês a mês</b> em ${anoAlvo}. Hoje o payload guarda
+        apenas a média anual por setor e a série mensal de Obras, Imóveis e Comunicação — falta o
+        rateio mensal dos demais departamentos, que vem do <code>Saídas ${anoAlvo}.xlsx</code>.<br><br>
+        Rode <code>python atualizar_dashboard.py --recalcular-setores</code> e a tabela aparece
+        preenchida, sem precisar mexer no HTML.
+      </div>`;
+      return;
+    }
+    const di = setorMensalTodos.dataInicio;
+    const base = (anoAlvo - di.ano)*12 - di.mes;
+    const colunas = [];
+    for(let m=0; m<12; m++){
+      const i = base + m;
+      if(i < 0 || i >= setorMensalTodos.nMeses) continue;
+      const temDado = Object.keys(setorMensalTodos.series)
+        .some(k => { const v = setorMensalTodos.series[k][i]; return v!==null && v!==undefined; });
+      if(temDado) colunas.push({ idx:i, rot: NOMES_ABR[m] + '/' + String(anoAlvo).slice(2) });
+    }
+    if(!colunas.length){
+      scroll.style.display = 'none';
+      aviso.innerHTML = `<div class="fx-aviso">Sem meses de ${anoAlvo} na série mensal por setor.</div>`;
+      return;
+    }
+    const linhas = Object.keys(setorMensalTodos.series).map(nome=>{
+      const vals = colunas.map(c=>{
+        const v = setorMensalTodos.series[nome][c.idx];
+        return (v===null || v===undefined) ? null : v;
+      });
+      const total = vals.filter(v=>v!==null).reduce((s,v)=>s+v,0);
+      return { nome, vals, total };
+    }).filter(l=> l.total !== 0).sort((a,b)=> b.total - a.total);
+
+    /* Coluna "Variacao": ultimo mes exibido contra o mes imediatamente anterior.
+       Por ser gasto, aumento = rosa e reducao = verde. Sem base de comparacao exibe "—". */
+    const iUlt = colunas.length - 1, iAnt = colunas.length - 2;
+    const rotUlt = colunas[iUlt].rot, rotAnt = iAnt >= 0 ? colunas[iAnt].rot : null;
+    function pctMensal(atual, anterior){
+      if(iAnt < 0 || atual===null || anterior===null || !anterior) return null;
+      return (atual/anterior - 1)*100;
+    }
+    function variacaoMensal(atual, anterior){
+      const pct = pctMensal(atual, anterior);
+      if(pct === null) return '—';
+      return `<span class="portal-chip ${pct>=0?'bad':'ok'}">${pct>=0?'▲':'▼'} ${fmtPct(pct)}</span>`;
+    }
+    const tituloVar = rotAnt ? `Variação percentual de ${rotUlt} em relação a ${rotAnt}` : `Sem mês anterior em ${anoAlvo} para comparar`;
+
+    const colP = (parcialSet && parcialSet.ano === anoAlvo) ? parcialSet : null;
+    const vParcial = (nome)=> colP && valido(colP.valores[nome]) ? colP.valores[nome] : null;
+    const tituloP = colP ? notaAte(colP.ate) + ' · não entra na Variação' : '';
+    hint.innerHTML = `Gasto por setor, mês a mês · ${colunas.length} ${colunas.length===1?'mês':'meses'} fechados de ${anoAlvo} (jan–${rotUlt})`
+      + (colP ? ` · <i>${esc(colP.rotulo)} em andamento${colP.ate ? ' (até ' + esc(colP.ate) + ')' : ''}, fora da Variação</i>` : '')
+      + (rotAnt ? ` · <b>Variação</b> = ${rotUlt} vs. ${rotAnt} (<span class="neg">rosa</span> = aumento · <span class="pos">verde</span> = redução)` : '');
+
+    const thP = colP ? `<th scope="col" class="fx-colparc" title="${esc(tituloP)}">${esc(colP.rotulo)} (parcial)</th>` : '';
+    const tdP = (v)=> colP ? `<td class="fx-colparc" title="${esc(tituloP)}">${v===null?'—':fmtBRL(v,0)}</td>` : '';
+    const thMeses = colunas.map(c=>`<th scope="col">${c.rot}</th>`).join('') + thP;
+    const exibidas = linhas.filter(l=>setorOk(l.nome));
+    const corpo = exibidas.map(l=>{
+      const tds = l.vals.map(v=> `<td>${v===null?'—':fmtBRL(v,0)}</td>`).join('') + tdP(vParcial(l.nome));
+      return `<tr><td>${esc(l.nome)}</td>${tds}<td class="fx-colvar">${variacaoMensal(l.vals[iUlt], iAnt>=0 ? l.vals[iAnt] : null)}</td></tr>`;
+    }).join('');
+    // O total considera todos os setores (mesmo com filtro/busca ativos)
+    const somas = colunas.map((c,ci)=> linhas.reduce((acc,l)=> acc + (l.vals[ci]||0), 0));
+    const somaP = colP ? linhas.reduce((acc,l)=> acc + (vParcial(l.nome)||0), 0) : null;
+    const totCol = somas.map(s=> `<td>${fmtBRL(s,0)}</td>`).join('') + tdP(somaP);
+    tbl.innerHTML = `<thead><tr><th scope="col">Setor</th>${thMeses}<th scope="col" class="fx-colvar" title="${esc(tituloVar)}">Variação</th></tr></thead>`
+      + `<tbody>${corpo}</tbody><tfoot><tr><td>Total</td>${totCol}<td class="fx-colvar">${variacaoMensal(somas[iUlt], iAnt>=0 ? somas[iAnt] : null)}</td></tr></tfoot>`;
+
+    tabelaMensalAtual = {
+      ano: anoAlvo, meses: colunas.map(c=>c.rot),
+      linhas: linhas.map(l=>({ nome:l.nome, vals:l.vals, parcial: vParcial(l.nome), pct: pctMensal(l.vals[iUlt], iAnt>=0 ? l.vals[iAnt] : null) })),
+      somas, somaParcial: somaP, pctTotal: pctMensal(somas[iUlt], iAnt>=0 ? somas[iAnt] : null),
+      rotParcial: colP ? `${colP.rotulo} (parcial${colP.ate ? ' até ' + colP.ate : ''})` : null
+    };
+    scroll.dataset.rolarFim = '1';
+    requestAnimationFrame(rolarMensalAoFim);
+  })();
+
+  /* ---------- Histórico por Setor ---------- */
+  const setorMensal = data.setorMensal;
+  const setorMesesLabel = [], setorAnos = [];
+  (function(){
+    let a = setorMensal.dataInicio.ano, m = setorMensal.dataInicio.mes;
+    for(let i=0;i<setorMensal.nMeses;i++){
+      setorMesesLabel.push(NOMES_ABR[m] + '/' + String(a).slice(2));
+      setorAnos.push(a);
+      m++; if(m>11){m=0; a++;}
+    }
+  })();
+  const secoesVisiveis = ['Comunicação','Obras','Imóveis','Audiovisual'].filter(setorOk);
+  document.querySelectorAll('[data-setor-sec]').forEach(el=>{ el.style.display = setorOk(el.dataset.setorSec) ? '' : 'none'; });
+  if(!secoesVisiveis.length){
+    document.getElementById('avisoHistVazio').innerHTML = `<div class="fx-aviso">Os setores selecionados no filtro não fazem parte do histórico mensal (Comunicação, Obras, Imóveis e Audiovisual). Ajuste o filtro "Setor" para ver esta página.</div>`;
+  }
+
+  function buildHistChart(chartId, nomeSetor, serieMensal){
+    const cor = COR_SETOR[nomeSetor];
+    const vP = parcialSet ? parcialSet.valores[nomeSetor] : null;
+    const temP = parcialSet && valido(vP);
+    const nota = temP ? notaAte(parcialSet.ate) : null;
+    const labels = temP ? setorMesesLabel.concat([rotuloParcial(parcialSet.rotulo)]) : setorMesesLabel;
+    const anos = temP ? setorAnos.concat([parcialSet.ano]) : setorAnos;
+    const dados = temP ? serieMensal.concat([vP]) : serieMensal;
+    const tend = temP ? movingAvg(serieMensal,6).concat([null]) : movingAvg(serieMensal,6);
+    const j = janela(anos);
+    mk(chartId, {
+      data:{ labels: pick(labels,j), datasets:[
+        {type:'bar', label: nomeSetor, data: pick(dados,j), backgroundColor: cor, borderRadius:1, barPercentage:.9, categoryPercentage:.9, order:2, $notaParcial: nota},
+        {type:'line', label:'Tendência (média 6m)', data: pick(tend,j), borderColor: COR.g[6], backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:.25, order:1, spanGaps:true},
+      ]},
+      options: opcoes({})
+    });
+    notaNoGrafico(chartId, nota);
+  }
+  function histKPIs(containerKpiId, serieMensal, anos, seriesAnual){
+    const idx = serieMensal.length-1;
+    const ultimoMes = serieMensal[idx], penultimoMes = serieMensal[idx-1];
+    const varMes = (valido(ultimoMes) && valido(penultimoMes) && penultimoMes) ? (ultimoMes/penultimoMes - 1)*100 : null;
+    const ultimoAno = seriesAnual[seriesAnual.length-1];
+    const penultimoAno = seriesAnual[seriesAnual.length-2];
+    const _semBase = (penultimoAno === null || penultimoAno === undefined || !penultimoAno);
+    const varAno = (_semBase || !valido(ultimoAno)) ? null : (ultimoAno/penultimoAno - 1)*100;
+    renderKPIs(containerKpiId, [
+      {label: anos.length ? `Média mensal ${anos[anos.length-1]}` : 'Média mensal', value:fmtBRL(ultimoAno), delta: varAno===null?null:fmtPct(varAno), dir: varAno===null?'':(varAno<=0?'good':'bad'), note: varAno===null?'':`vs. ${anos[anos.length-2]}`},
+      {label:'Último mês', value:fmtBRL(ultimoMes), delta: varMes===null?null:fmtPct(varMes), dir: varMes===null?'':(varMes<=0?'good':'bad'),
+       note: varMes===null ? `${setorMesesLabel[idx]} sem lançamentos deste setor` : setorMesesLabel[idx]+' vs. '+setorMesesLabel[idx-1]},
+    ]);
+  }
+  function histTable(tblId, anosList, seriesAnual){
+    const el = document.getElementById(tblId);
+    if(!el) return;
+    let prev = null;
+    const rows = [];
+    anosList.forEach((a,i)=>{
+      const media = seriesAnual[i];
+      if(media===null || media===undefined){ if(anoOk(a)) rows.push(`<tr><td>${a}</td><td>—</td><td>—</td></tr>`); return; }
+      let variacao = '—';
+      if(prev!==null){
+        const pct = (media/prev - 1)*100;
+        variacao = `<span class="${pct>=0?'neg':'pos'}">${fmtPct(pct)}</span>`;
+      }
+      prev = media;
+      if(anoOk(a)) rows.push(`<tr><td>${a}</td><td>${fmtBRLc(media)}</td><td>${variacao}</td></tr>`);
+    });
+    el.innerHTML = `<thead><tr><th>Ano</th><th>Média mensal</th><th>Variação</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  }
+  [['Comunicação','kpi-hist-comunicacao','chartHistComunicacao','tblHistComunicacao'],
+   ['Obras','kpi-hist-obras','chartHistObras','tblHistObras'],
+   ['Imóveis','kpi-hist-imoveis','chartHistImoveis','tblHistImoveis']].forEach(([nome,kpi,chart,tbl])=>{
+    if(!setorOk(nome)) return;
+    histKPIs(kpi, setorMensal[nome], setorEvolucao.labels, setorEvolucao[nome]);
+    buildHistChart(chart, nome, setorMensal[nome]);
+    histTable(tbl, setorEvolucao.labels, setorEvolucao[nome]);
+  });
+
+  (function histAudiovisual(){
+    if(!setorOk('Audiovisual')) return;
+    const serie = setorMensal['Audiovisual'];
+    const anual = setorEvolucao['Audiovisual'];
+    const row   = document.getElementById('rowHistAudiovisual');
+    const aviso = document.getElementById('avisoHistAudiovisual');
+    if(!Array.isArray(serie) || !serie.some(v=>v!==null&&v!==undefined)){
+      row.style.display = 'none';
+      aviso.innerHTML = `<div class="fx-aviso">
+        <b>Série mensal de Audiovisual ainda não carregada.</b><br>
+        Comunicação, Obras e Imóveis têm planilha dedicada com histórico desde jan/2018.
+        Audiovisual não tem — o histórico mensal dele precisa ser apurado nos arquivos
+        <code>Saídas &lt;ANO&gt;.xlsx</code>, agrupando a coluna <code>Departamento</code> por mês.<br><br>
+        Rode <code>python atualizar_dashboard.py --recalcular-setores</code>: o script varre todos os
+        arquivos <code>Saídas &lt;ANO&gt;.xlsx</code> que encontrar na pasta e monta a série completa.
+      </div>`;
+      return;
+    }
+    row.style.display = '';
+    if(Array.isArray(anual) && anual.some(v=>v!==null&&v!==undefined)){
+      histKPIs('kpi-hist-audiovisual', serie, setorEvolucao.labels, anual);
+      histTable('tblHistAudiovisual', setorEvolucao.labels, anual);
+    }
+    buildHistChart('chartHistAudiovisual', 'Audiovisual', serie);
+  })();
+
+  aplicarBusca();
+}
+
+/* ======================================================================
+   BUSCA (cfg.busca do shell): filtra meses do demonstrativo e setores das tabelas
+====================================================================== */
+function renderDemonstrativo(){
+  const tbl = document.getElementById('tblDemo'), rod = document.getElementById('rodapeDemo');
+  if(!demo || !tbl) return;
+  const q = semAcento(F.busca.trim());
+  const idx = janela(demo.linhas.map(l=>l.ano));
+  let rows = idx.map(i=>demo.linhas[i]).reverse();           // mais recente primeiro
+  if(q) rows = rows.filter(l=> semAcento(l.rot + ' ' + l.ano + ' ' + NOMES_FULL[l.mes]).includes(q));
+  const M = rows.length, LIM = 12;
+  const exibidas = F.expandido ? rows : rows.slice(0, LIM);
+  const fechadas = exibidas.filter(l=>!l.parcial);
+  const tEnt = fechadas.reduce((s,l)=>s+l.ent,0), tSai = fechadas.reduce((s,l)=>s+l.sai,0), tSal = tEnt - tSai;
+  const margem = (s,e)=> e ? fmtPct(s/e*100) : '—';
+  const corpo = exibidas.map(l=>{
+    const saldo = l.ent - l.sai;
+    const status = l.parcial ? '<span class="portal-chip info">Parcial</span>'
+      : (saldo>=0 ? '<span class="portal-chip ok">Superávit</span>' : '<span class="portal-chip bad">Déficit</span>');
+    return `<tr class="${l.parcial?'fx-parcial':''}"${l.parcial&&l.ate?` title="${esc(l.ate)} · fora dos totais"`:''}>
+      <td><i class="fx-dot" style="background:${l.parcial?'var(--primary)':(saldo>=0?'var(--graf-pos)':'var(--graf-neg)')}"></i>${esc(l.rot)}${l.parcial?' (em andamento)':''}</td>
+      <td class="pos">${fmtBRLc(l.ent)}</td><td class="neg">${fmtBRLc(l.sai)}</td>
+      <td class="${saldo>=0?'pos':'neg'}" style="font-weight:600">${saldo>=0?'+':''}${fmtBRLc(saldo)}</td>
+      <td>${margem(saldo,l.ent)}</td><td class="c">${status}</td></tr>`;
+  }).join('');
+  tbl.innerHTML = `<thead><tr><th>Mês / ano</th><th>Entradas (R$)</th><th>Saídas (R$)</th><th>Saldo líquido (R$)</th><th title="Saldo líquido ÷ entradas">Margem</th><th class="c">Status</th></tr></thead>`
+    + (M ? `<tbody>${corpo}</tbody>` : `<tbody><tr><td colspan="6" style="text-align:center;padding:24px">Nenhum mês corresponde aos filtros.</td></tr></tbody>`)
+    + (fechadas.length ? `<tfoot><tr><td>Total · ${fechadas.length} ${fechadas.length===1?'mês fechado':'meses fechados'}</td><td class="pos">${fmtBRLc(tEnt)}</td><td class="neg">${fmtBRLc(tSai)}</td>`
+      + `<td class="${tSal>=0?'pos':'neg'}">${tSal>=0?'+':''}${fmtBRLc(tSal)}</td><td>${margem(tSal,tEnt)}</td><td></td></tr></tfoot>` : '');
+  rod.innerHTML = `<span><span class="material-symbols-outlined" aria-hidden="true">info</span>Margem = saldo líquido ÷ entradas. Mês em andamento (parcial) fica fora dos totais.</span>
+    <span class="row gap-3">Exibindo ${exibidas.length} de ${M} ${M===1?'mês':'meses'}${M>LIM
+      ? `<button type="button" id="btnDemoExp" class="portal-link">${F.expandido ? 'Mostrar só os 12 mais recentes' : 'Ver todos os ' + M + ' meses'}<span class="material-symbols-outlined" aria-hidden="true">${F.expandido ? 'expand_less' : 'chevron_right'}</span></button>` : ''}</span>`;
+  const b = document.getElementById('btnDemoExp');
+  if(b) b.addEventListener('click', ()=>{ F.expandido = !F.expandido; renderDemonstrativo(); });
+}
+function aplicarBusca(){
+  const q = semAcento(F.busca.trim());
+  document.querySelectorAll('#tblSetores tbody tr').forEach(tr=>{
+    tr.style.display = (!q || semAcento(tr.cells[0].textContent).includes(q)) ? '' : 'none';
+  });
+  const tbl = document.getElementById('tblSetoresMensal');
+  const cont = document.getElementById('contagemSetoresMensal');
+  const linhas = tbl ? tbl.querySelectorAll('tbody tr') : [];
+  let vis = 0;
+  linhas.forEach(tr=>{
+    const ok = !q || semAcento(tr.cells[0].textContent).includes(q);
+    tr.style.display = ok ? '' : 'none';
+    if(ok) vis++;
+  });
+  if(cont) cont.textContent = !linhas.length ? '' : ((q || F.setores.size)
+    ? `Exibindo ${vis} de ${tabelaMensalAtual ? tabelaMensalAtual.linhas.length : linhas.length} setores (a linha Total considera todos)`
+    : `Exibindo ${linhas.length} setores`);
+  renderDemonstrativo();
+}
+
+/* A tabela mensal abre mostrando os meses mais recentes (so quando a aba esta visivel) */
+function rolarMensalAoFim(){
+  const r = document.getElementById('scrollSetoresMensal');
+  if(!r || r.dataset.rolarFim !== '1' || !r.clientWidth) return;
+  r.scrollLeft = r.scrollWidth;
+  delete r.dataset.rolarFim;
+}
+
+/* ======================================================================
+   DOWNLOAD por Blob com fallback (o iframe do Apps Script pode bloquear)
+====================================================================== */
+let dlUltimo = null, dlTimer = null;
+function garanteDl(){
+  if(document.getElementById('dlAviso')) return;
+  const w = document.createElement('div');
+  w.innerHTML = `<div id="dlAviso" role="status"><span>Se o download não iniciou, copie o conteúdo:</span><button type="button" id="dlAbrir">Ver / copiar</button><button type="button" id="dlFechaAviso" aria-label="Fechar aviso">×</button></div>
+    <div id="dlModal" role="dialog" aria-modal="true" aria-label="Conteúdo do arquivo"><div class="caixa"><b id="dlTitulo">Arquivo</b><textarea id="dlTexto" readonly aria-label="Conteúdo do arquivo"></textarea>
+    <div class="acoes"><button type="button" class="portal-btn" id="dlCopiar">Copiar</button><button type="button" class="portal-btn primario" id="dlFechar">Fechar</button></div></div></div>`;
+  document.body.appendChild(w);
+  document.getElementById('dlAbrir').addEventListener('click', ()=>{
+    if(!dlUltimo) return;
+    document.getElementById('dlTitulo').textContent = dlUltimo.nome;
+    const ta = document.getElementById('dlTexto');
+    ta.value = dlUltimo.texto;
+    document.getElementById('dlModal').classList.add('on');
+    ta.focus(); ta.select();
+  });
+  document.getElementById('dlFechaAviso').addEventListener('click', ()=> document.getElementById('dlAviso').classList.remove('on'));
+  document.getElementById('dlFechar').addEventListener('click', ()=> document.getElementById('dlModal').classList.remove('on'));
+  document.getElementById('dlCopiar').addEventListener('click', ()=>{
+    const ta = document.getElementById('dlTexto');
+    ta.focus(); ta.select();
+    let ok = false;
+    try{ ok = document.execCommand('copy'); }catch(e){}
+    if(!ok && navigator.clipboard){ try{ navigator.clipboard.writeText(ta.value); }catch(e){} }
+  });
+}
+function baixarTexto(nome, texto, mime){
+  garanteDl();
+  dlUltimo = {nome, texto};
+  try{
+    const blob = new Blob([texto], {type:mime});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 2000);
+  }catch(e){ /* sem Blob/download: cai no atalho */ }
+  const av = document.getElementById('dlAviso');
+  av.classList.add('on');
+  clearTimeout(dlTimer);
+  dlTimer = setTimeout(()=> av.classList.remove('on'), 15000);
+}
+
+/* ---------- Exportar CSV (abre direto no Excel pt-BR) ---------- */
+const csvNum = (v, casas)=> (v===null || v===undefined || !isFinite(v)) ? '' : v.toFixed(casas).replace('.', ',');
+const csvEsc = (x)=> /[;"\n]/.test(String(x)) ? `"${String(x).replace(/"/g,'""')}"` : x;
+function csvSetores(){
+  const t = tabelaMensalAtual;
+  if(!t){ SHELL.toast('Sem dados de setores para exportar.'); return; }
+  const q = semAcento(F.busca.trim());
+  const linhasVis = t.linhas.filter(l=> setorOk(l.nome) && (!q || semAcento(l.nome).includes(q)));
+  const cP = t.rotParcial ? [t.rotParcial] : [];
+  const linhas = [['Setor', ...t.meses, ...cP, 'Variação (%)'].map(csvEsc).join(';')];
+  linhasVis.forEach(l=> linhas.push([csvEsc(l.nome), ...l.vals.map(v=>csvNum(v,2)), ...(t.rotParcial ? [csvNum(l.parcial,2)] : []), csvNum(l.pct,1)].join(';')));
+  linhas.push(['Total', ...t.somas.map(v=>csvNum(v,2)), ...(t.rotParcial ? [csvNum(t.somaParcial,2)] : []), csvNum(t.pctTotal,1)].join(';'));
+  baixarTexto(`evolucao_mensal_setores_${t.ano}.csv`, '\ufeff' + linhas.join('\r\n'), 'text/csv;charset=utf-8');
+}
+function csvDemonstrativo(){
+  if(!demo){ SHELL.toast('Sem dados para exportar.'); return; }
+  const q = semAcento(F.busca.trim());
+  const idx = janela(demo.linhas.map(l=>l.ano));
+  let rows = idx.map(i=>demo.linhas[i]);
+  if(q) rows = rows.filter(l=> semAcento(l.rot + ' ' + l.ano + ' ' + NOMES_FULL[l.mes]).includes(q));
+  const linhas = [['Mês/ano','Entradas (R$)','Saídas (R$)','Saldo líquido (R$)','Margem (%)','Status'].join(';')];
+  rows.forEach(l=>{
+    const s = l.ent - l.sai;
+    linhas.push([csvEsc(l.rot), csvNum(l.ent,2), csvNum(l.sai,2), csvNum(s,2), csvNum(l.ent ? s/l.ent*100 : null,1), l.parcial ? 'Parcial' : (s>=0 ? 'Superávit' : 'Déficit')].join(';'));
+  });
+  baixarTexto('demonstrativo_mensal_fluxo_de_caixa.csv', '\ufeff' + linhas.join('\r\n'), 'text/csv;charset=utf-8');
+}
+function exportarCsv(){
+  const p = SHELL.ativa();
+  if(p === 'setores' || p === 'historico') csvSetores(); else csvDemonstrativo();
+}
+
+/* ======================================================================
+   FAIXA DE FILTROS (#filtros do shell)
+====================================================================== */
+const multis = {};
+function criaMulti(el, rotulo, plural){
+  el.innerHTML = `<button type="button" class="portal-sel fx-ms-btn" aria-haspopup="listbox" aria-expanded="false"><span class="ms-txt"></span><span class="material-symbols-outlined" aria-hidden="true">arrow_drop_down</span></button>
+    <div class="fx-ms-pop" role="listbox" aria-multiselectable="true" aria-label="${rotulo}" hidden></div>`;
+  const btn = el.querySelector('.fx-ms-btn'), pop = el.querySelector('.fx-ms-pop'), txt = el.querySelector('.ms-txt');
+  const api = { sel:null, opcoes:[], onChange:()=>{} };
+  api.texto = ()=>{
+    const v = [...api.sel].sort((a,b)=> typeof a === 'number' ? a-b : String(a).localeCompare(String(b),'pt-BR'));
+    txt.textContent = rotulo + ': ' + (!v.length ? 'Todos' : v.length <= 2 ? v.map(x=>(api.opcoes.find(o=>o.v===x)||{label:x}).label).join(', ') : v.length + ' ' + plural);
+  };
+  api.render = ()=>{
+    pop.innerHTML = `<button type="button" class="fx-ms-limpa">Limpar seleção (todos)</button>` + api.opcoes.map((o,i)=>
+      `<label class="fx-ms-op" role="option"><input type="checkbox" data-i="${i}" ${api.sel.has(o.v)?'checked':''}><span>${esc(o.label)}</span></label>`).join('');
+    pop.querySelector('.fx-ms-limpa').addEventListener('click', ()=>{ api.sel.clear(); api.render(); api.texto(); api.onChange(); });
+    pop.querySelectorAll('input').forEach(inp=> inp.addEventListener('change', ()=>{
+      const o = api.opcoes[+inp.dataset.i];
+      if(inp.checked) api.sel.add(o.v); else api.sel.delete(o.v);
+      api.texto(); api.onChange();
+    }));
+  };
+  api.fecha = ()=>{ pop.hidden = true; btn.setAttribute('aria-expanded','false'); };
+  btn.addEventListener('click', (ev)=>{
+    ev.stopPropagation();
+    const abrir = pop.hidden;
+    Object.values(multis).forEach(m=>m.fecha());
+    pop.hidden = !abrir; btn.setAttribute('aria-expanded', String(abrir));
+  });
+  pop.addEventListener('click', ev=>ev.stopPropagation());
+  return api;
+}
+function montarFiltros(){
+  const box = SHELL.filtros;
+  box.innerHTML = `<span class="rot"><span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>Filtros:</span>
+    <div data-f="ano" class="fx-ms"></div>
+    <div data-f="periodo" class="portal-seg" role="group" aria-label="Período rápido">
+      <button type="button" data-p="12" aria-pressed="false">12m</button><button type="button" data-p="24" aria-pressed="false">24m</button>
+      <button type="button" data-p="60" aria-pressed="false">5 anos</button><button type="button" data-p="0" aria-pressed="true">Tudo</button></div>
+    <div data-f="setor" class="fx-ms"></div>
+    <button type="button" id="f-limpar" class="portal-link"><span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>Limpar filtros</button>`;
+  multis.ano = criaMulti(box.querySelector('[data-f="ano"]'), 'Ano', 'anos');
+  multis.setor = criaMulti(box.querySelector('[data-f="setor"]'), 'Setor', 'setores');
+  multis.ano.sel = F.anos; multis.setor.sel = F.setores;
+  multis.ano.onChange = multis.setor.onChange = aplicarFiltros;
+  multis.ano.texto(); multis.setor.texto();
+  box.querySelectorAll('[data-p]').forEach(b=> b.addEventListener('click', ()=>{ F.periodo = +b.dataset.p; sincronizaPeriodo(); aplicarFiltros(); }));
+  document.getElementById('f-limpar').addEventListener('click', ()=>{
+    F.anos.clear(); F.setores.clear(); F.periodo = 0; F.busca = ''; F.expandido = false;
+    const bi = document.getElementById('busca'); if(bi) bi.value = '';
+    multis.ano.render(); multis.setor.render(); multis.ano.texto(); multis.setor.texto();
+    sincronizaPeriodo(); aplicarFiltros();
+  });
+  document.addEventListener('click', ()=> Object.values(multis).forEach(m=>m.fecha()));
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') Object.values(multis).forEach(m=>m.fecha()); });
+  stripPronta = true;
+  visibilidadeFiltros(SHELL.ativa());
+}
+function sincronizaPeriodo(){
+  document.querySelectorAll('#filtros [data-p]').forEach(b=> b.setAttribute('aria-pressed', String(+b.dataset.p === F.periodo)));
+}
+/* Ano e periodo valem para as paginas mensais/anuais; Setor para as paginas de setores */
+function visibilidadeFiltros(id){
+  if(!stripPronta) return;
+  const f = n => document.querySelector('#filtros [data-f="' + n + '"]');
+  const usaTempo = id !== 'setores', usaSetor = ['visao','setores','historico'].includes(id);
+  f('ano').style.display = usaTempo ? '' : 'none';
+  f('periodo').style.display = usaTempo ? '' : 'none';
+  f('setor').style.display = usaSetor ? '' : 'none';
+}
+function atualizaOpcoes(d){
+  const anos = new Set(); let a = d.dataInicio.ano, m = d.dataInicio.mes;
+  for(let i=0;i<d.nMeses;i++){ anos.add(a); m++; if(m>11){m=0;a++;} }
+  if(d.parcial) anos.add(d.parcial.ano);
+  const listaAnos = [...anos].sort((x,y)=>x-y);
+  [...F.anos].forEach(v=>{ if(!anos.has(v)) F.anos.delete(v); });
+  multis.ano.opcoes = listaAnos.slice().reverse().map(v=>({v, label:String(v)}));
+  const series = (d.setorMensalTodos && d.setorMensalTodos.series) || {};
+  const nomes = Object.keys(series).filter(n=> series[n].some(v=>v!==null && v!==undefined)).sort((x,y)=>x.localeCompare(y,'pt-BR'));
+  [...F.setores].forEach(v=>{ if(nomes.indexOf(v) < 0) F.setores.delete(v); });
+  multis.setor.opcoes = nomes.map(v=>({v, label:v}));
+  multis.ano.render(); multis.setor.render(); multis.ano.texto(); multis.setor.texto();
+}
+function aplicarFiltros(){
+  if(!payload) return;
+  desenhar(true);
+}
+
+/* ======================================================================
+   ESTADO (carregando / erro), STATUS DO SHELL, REDESENHO
+====================================================================== */
+let ultimoProgresso = null;
+function mostraEstado(tipo, titulo, texto){
+  const el = document.getElementById('estado-base');
+  if(!el) return;
+  if(!tipo){ el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const erro = tipo === 'erro';
+  el.innerHTML = `<div class="portal-card fx-estado" role="${erro?'alert':'status'}" aria-live="polite">
+    <span class="material-symbols-outlined ic ${erro?'erro':'portal-gira'}" aria-hidden="true">${erro?'error':'sync'}</span>
+    <h2 class="fx-h2">${esc(titulo)}</h2>
+    <p>${esc(texto)}</p>
+    ${erro ? '<button type="button" id="btnRetry" class="portal-btn primario"><span class="material-symbols-outlined" aria-hidden="true">sync</span>Tentar novamente</button>'
+           : '<div class="prog"><div id="prog-txt" class="prog-txt"></div><div class="portal-progress"><i id="prog-bar" class="prog-barra" style="width:0%"></i></div></div>'}
+  </div>`;
+  const b = document.getElementById('btnRetry');
+  if(b) b.addEventListener('click', ()=>{ window.FluxoBase && window.FluxoBase.atualizar(); });
+}
+window.__FLUXO_UI = {
+  status(texto, tipo){ if(tipo === 'erro') SHELL.setStatus({erro:texto}); },
+  progresso(texto, pct){
+    if(texto == null){ ultimoProgresso = null; return; }
+    const pt = document.getElementById('prog-txt'), pb = document.getElementById('prog-bar');
+    if(pt){ pt.textContent = texto; pb.style.width = Math.round(pct||0) + '%'; }
+    else SHELL.setStatus({fonte: texto});
+  },
+  ocupado(sim){ /* o botao "Atualizar dados" do shell controla o proprio estado */ },
+  semBase(titulo, texto, ehErro){
+    document.body.classList.add('sem-base');
+    mostraEstado(ehErro ? 'erro' : 'carregando', titulo, texto);
+  },
+  aplicado(meta, dados){
+    const n = (meta.arquivos || []).length;
+    SHELL.setStatus({ fonte:'Fonte: Google Drive · ' + n + (n===1?' planilha':' planilhas'), dados: meta.sincronizadoEm || meta.geradoEm || '' });
+  }
+};
+
+/* Redesenha tudo com os filtros/tema atuais */
+function desenhar(animar){
+  if(!payload) return;
+  limpar();
+  configurarChart(animar);
+  window.__erroDashboard = null;
+  try{
+    initApp(payload);
+    document.body.classList.add('base-ok');
+  }catch(e){
+    console.error('Falha ao montar o dashboard com a base lida:', e);
+    window.__erroDashboard = (e && e.message) ? e.message : String(e);
+    SHELL.setStatus({erro: 'parte do dashboard não pôde ser montada (' + window.__erroDashboard + ')'});
+  }
+  requestAnimationFrame(()=> charts.forEach(c=>{ try{ c.resize(); }catch(e){} }));
+}
+/* Ponto unico chamado pela base ao (re)ler os dados. dados = null => estado "carregando". */
+window.__renderDashboard = function(dados){
+  window.__erroDashboard = null;
+  document.body.classList.remove('base-ok');
+  if(!dados){
+    payload = null; limpar();
+    document.body.classList.add('sem-base');
+    return false;
+  }
+  payload = dados;
+  if(stripPronta) atualizaOpcoes(dados);
+  document.body.classList.remove('sem-base');
+  mostraEstado(null);
+  desenhar(true);
+  return !window.__erroDashboard;
+};
+
+document.addEventListener('portal:tema', ()=>{ if(payload) desenhar(false); });
+
+/* Brilho/sombra global (como no original); rotulos de dados (datalabels) so nas roscas, via plugins:[...] do proprio grafico */
+if(window.Chart) Chart.register(pluginFX);
+
+/* ======================================================================
+   SHELL
+====================================================================== */
+SHELL.init({
+  chave:'fluxo', titulo:'Fluxo de Caixa', icone:'payments',
+  dashboards: <?!= JSON.stringify(DASHBOARDS) ?>,
+  paginas:[
+    {id:'visao', rotulo:'Visão Geral', icone:'query_stats'},
+    {id:'entradas', rotulo:'Entradas', icone:'arrow_circle_down'},
+    {id:'saidas', rotulo:'Saídas', icone:'arrow_circle_up'},
+    {id:'fluxo', rotulo:'Fluxo de Caixa', icone:'account_balance'},
+    {id:'setores', rotulo:'Setores', icone:'domain'},
+    {id:'historico', rotulo:'Histórico por Setor', icone:'history'}
+  ],
+  inicial:'visao',
+  onNavegar:(id)=>{
+    visibilidadeFiltros(id);
+    charts.forEach(c=>{ try{ c.resize(); }catch(e){} });
+    requestAnimationFrame(()=>{ charts.forEach(c=>{ try{ c.resize(); }catch(e){} }); if(id==='setores') rolarMensalAoFim(); });
+  },
+  busca:{ placeholder:'Buscar mês ou setor…', aoDigitar:(txt)=>{ F.busca = txt || ''; aplicarBusca(); } },
+  exportar:[
+    { rotulo:'Exportar CSV', icone:'table_chart', fn:exportarCsv },
+    { rotulo:'Imprimir', icone:'print', fn:()=>window.print() }
+  ],
+  atualizar:()=> window.FluxoBase.atualizar().then(ok=>{ if(ok) SHELL.toast('Dados atualizados do Drive.'); return ok; })
+});
+montarFiltros();
+
+})();
+</script>
+<?!= include('dash_fluxo_base') ?>
+</body>
+</html>

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Máquinas de Cartões · Portal Financeiro</title>
+<?!= include('shell_portal') ?>
+<?!= include('portal_dados') ?>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/4.0.0/plotly.min.js"></script>
+<?!= include('dash_maquinas_css') ?>
+</head>
+<body class="sem-dados">
+
+<div id="portal-conteudo" hidden>
+
+  <!-- tela de espera: primeira carga dos dados (progresso e erro) -->
+  <div id="cargaHost">
+    <div class="portal-panel carga-card" id="cargaCard" aria-live="polite">
+      <div class="row gap-3">
+        <span class="ic-caixa"><span class="material-symbols-outlined">point_of_sale</span></span>
+        <div>
+          <div class="t" id="cargaTitulo">Carregando os dados…</div>
+          <div class="s" id="cargaTexto">Buscando a base no Drive. Isso leva alguns segundos.</div>
+        </div>
+      </div>
+      <div class="carga-barra" id="cargaBarra" role="progressbar" aria-label="Carregando dados"><i></i></div>
+      <p class="muted carga-tempo" id="cargaTempo"></p>
+      <div class="portal-callout bad" id="cargaErro" hidden>
+        <div class="row gap-3 top">
+          <div class="ic"><span class="material-symbols-outlined">error</span></div>
+          <div><div class="tt">Falha ao carregar</div><p id="cargaErroTexto"></p></div>
+        </div>
+      </div>
+      <button class="portal-btn primario" type="button" id="btnTentar" hidden>
+        <span class="material-symbols-outlined">sync</span>Tentar novamente
+      </button>
+    </div>
+  </div>
+
+  <!-- ====================================================== Análise de Receita -->
+  <section data-pagina="receita"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Análise de Receita</h1>
+        <p>Receita capturada, volume transacionado e comportamento mensal.</p>
+      </div>
+      <span class="portal-chip ok st-filtro">—</span>
+    </div>
+
+    <div class="aviso-host col gap-3" id="avisoHost"></div>
+
+    <div class="g gap-4">
+      <article class="portal-kpi hero c3">
+        <div class="topo-k"><span class="rotulo">Receita total</span><span class="ic-k"><span class="material-symbols-outlined">payments</span></span></div>
+        <div class="valor" id="kpiReceita">—</div>
+        <div id="kpiReceitaVar"></div>
+        <div class="sub" id="kpiReceitaApoio"></div>
+        <div class="kpi-extra" id="kpiReceitaExtra"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Total de transações</span><span class="ic-k"><span class="material-symbols-outlined">swap_horiz</span></span></div>
+        <div class="valor" id="kpiTransacoes">—</div>
+        <div class="sub" id="kpiTransacoesApoio"></div>
+        <div class="kpi-extra" id="kpiTransacoesExtra"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Ticket médio</span><span class="ic-k"><span class="material-symbols-outlined">confirmation_number</span></span></div>
+        <div class="valor" id="kpiTicket">—</div>
+        <div class="sub" id="kpiTicketApoio"></div>
+        <div class="kpi-extra" id="kpiTicketExtra"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Máquinas com movimento</span><span class="ic-k"><span class="material-symbols-outlined">point_of_sale</span></span></div>
+        <div class="valor" id="kpiPdvComMovimento">—</div>
+        <div class="sub" id="kpiPdvComMovimentoApoio"></div>
+        <div class="kpi-extra" id="kpiPdvComMovimentoExtra"></div>
+      </article>
+    </div>
+
+    <div class="g">
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Composição da receita por tipo</div><div class="s">Participação de cada modalidade na receita aprovada</div></div></div>
+        <div class="chart-corpo">
+          <div class="chart-canvas" id="gReceitaTipoPct"></div>
+          <div class="chart-legenda" id="lgReceitaTipoPct"></div>
+        </div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Composição da receita por bandeira</div><div class="s">Participação de cada bandeira na receita aprovada</div></div></div>
+        <div class="chart-corpo">
+          <div class="chart-canvas" id="gReceitaBandeiraPct"></div>
+          <div class="chart-legenda" id="lgReceitaBandeiraPct"></div>
+        </div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Receita por tipo</div><div class="s">Valor capturado por modalidade no período</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas" id="gReceitaTipo"></div></div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Transações por tipo</div><div class="s">Quantidade de transações; aprovação e movimentação no tooltip</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas" id="gMovimentacaoTipo"></div></div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Transações por mês</div><div class="s">Aprovadas e não aprovadas, empilhadas</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas" id="gTransacoesMes"></div></div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Receita mensal</div><div class="s">Evolução da receita aprovada — arraste para dar zoom</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas" id="gReceitaMensal"></div></div>
+      </article>
+    </div>
+  </div></section>
+
+  <!-- ====================================================== PDV por Localidade -->
+  <section data-pagina="localidade"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>PDV por Localidade</h1>
+        <p>Cobertura do parque instalado, utilização e desempenho por região.</p>
+      </div>
+      <span class="portal-chip ok st-filtro">—</span>
+    </div>
+
+    <div class="g gap-4">
+      <article class="portal-kpi hero c3">
+        <div class="topo-k"><span class="rotulo">Quantidade de PDVs</span><span class="ic-k"><span class="material-symbols-outlined">point_of_sale</span></span></div>
+        <div class="valor" id="kpiQtdPdv">—</div>
+        <div class="sub" id="kpiQtdPdvApoio"></div>
+        <div class="kpi-extra" id="kpiQtdPdvExtra"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Igrejas com PDVs</span><span class="ic-k"><span class="material-symbols-outlined">church</span></span></div>
+        <div class="valor" id="kpiQtdIgrejas">—</div>
+        <div class="sub" id="kpiQtdIgrejasApoio"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">PDVs ativos no período</span><span class="ic-k"><span class="material-symbols-outlined">monitoring</span></span></div>
+        <div class="valor" id="kpiPdvsAtivos">—</div>
+        <div class="sub" id="kpiPdvsAtivosApoio"></div>
+        <div class="kpi-extra" id="kpiPdvsAtivosExtra"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Receita por máquina</span><span class="ic-k"><span class="material-symbols-outlined">payments</span></span></div>
+        <div class="valor" id="kpiReceitaPorMaquina">—</div>
+        <div class="sub" id="kpiReceitaPorMaquinaApoio"></div>
+      </article>
+    </div>
+
+    <div class="g">
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">PDVs ativos e inativos</div><div class="s">Ativo = máquina com pelo menos uma transação aprovada no período</div></div></div>
+        <div class="chart-corpo">
+          <div class="chart-canvas" id="gPdvAtivoInativo"></div>
+          <div class="chart-legenda" id="lgPdvAtivoInativo"></div>
+        </div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Máquinas por região</div><div class="s">Distribuição do parque instalado</div></div></div>
+        <div class="chart-corpo">
+          <div class="chart-canvas" id="gMaquinasRegiao"></div>
+          <div class="chart-legenda" id="lgMaquinasRegiao"></div>
+        </div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Receita por região</div><div class="s">Receita aprovada acumulada no período</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas" id="gReceitaRegiao"></div></div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Transações por região</div><div class="s">Volume de transações no período</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas" id="gTransacoesRegiao"></div></div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Receita por descrição de igreja</div><div class="s">Perfil da unidade no cadastro — máquinas e ticket no tooltip</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas" id="gReceitaDescIgreja"></div></div>
+      </article>
+      <article class="portal-panel c6">
+        <div class="cab"><div><div class="t">Máquinas por descrição de igreja</div><div class="s">Como o parque se distribui entre os perfis</div></div></div>
+        <div class="chart-corpo">
+          <div class="chart-canvas" id="gMaquinasDescIgreja"></div>
+          <div class="chart-legenda" id="lgMaquinasDescIgreja"></div>
+        </div>
+      </article>
+      <article class="portal-panel c12">
+        <div class="cab"><div><div class="t">Distribuição regional de máquinas</div><div class="s">Participação de cada região no total de máquinas do filtro</div></div></div>
+        <div class="chart-corpo"><div class="mini-roscas" id="miniRoscas"></div></div>
+      </article>
+      <article class="portal-panel c12">
+        <div class="cab"><div><div class="t">Utilização mensal do parque</div><div class="s">% das máquinas do filtro com movimento no mês — a quantidade está no tooltip</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas is-alta" id="gUtilizacaoMensal"></div></div>
+      </article>
+    </div>
+  </div></section>
+
+  <!-- ====================================================== Consulta por Estado -->
+  <section data-pagina="estado"><div class="portal-page">
+    <div class="portal-pagehead">
+      <div>
+        <h1>Consulta por Estado</h1>
+        <p>Transações e receita por estado, com abertura por município.</p>
+      </div>
+      <span class="portal-chip ok st-filtro">—</span>
+    </div>
+
+    <div class="g gap-4">
+      <article class="portal-kpi hero c3">
+        <div class="topo-k"><span class="rotulo">Estados atendidos</span><span class="ic-k"><span class="material-symbols-outlined">map</span></span></div>
+        <div class="valor" id="kpiEstados">—</div>
+        <div class="sub" id="kpiEstadosApoio"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Municípios atendidos</span><span class="ic-k"><span class="material-symbols-outlined">location_city</span></span></div>
+        <div class="valor" id="kpiMunicipios">—</div>
+        <div class="sub" id="kpiMunicipiosApoio"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Estado líder em receita</span><span class="ic-k"><span class="material-symbols-outlined">emoji_events</span></span></div>
+        <div class="valor" id="kpiEstadoLider">—</div>
+        <div class="sub" id="kpiEstadoLiderApoio"></div>
+      </article>
+      <article class="portal-kpi c3">
+        <div class="topo-k"><span class="rotulo">Receita média por estado</span><span class="ic-k"><span class="material-symbols-outlined">bar_chart</span></span></div>
+        <div class="valor" id="kpiReceitaMediaEstado">—</div>
+        <div class="sub" id="kpiReceitaMediaEstadoApoio"></div>
+      </article>
+    </div>
+
+    <div class="g">
+      <article class="portal-panel c12">
+        <div class="cab"><div><div class="t">Receita por estado</div><div class="s">Receita aprovada; transações, PDVs e ticket médio no tooltip</div></div></div>
+        <div class="chart-corpo"><div class="chart-canvas is-alta" id="gEstados"></div></div>
+      </article>
+
+      <article class="portal-panel c12">
+        <div class="cab">
+          <div>
+            <div class="t">Tabela dinâmica por estado</div>
+            <div class="s">Clique no estado para abrir os municípios; clique no cabeçalho para ordenar</div>
+          </div>
+          <div class="row wrap gap-2">
+            <label class="busca">
+              <span class="material-symbols-outlined">search</span>
+              <input class="portal-input" type="search" id="buscaEstados" placeholder="Buscar estado ou município…" aria-label="Buscar estado ou município">
+            </label>
+            <button class="portal-btn" type="button" id="btnAbrirTodos">
+              <span class="material-symbols-outlined">unfold_more</span><span id="btnAbrirTodosTexto">Abrir todos</span>
+            </button>
+          </div>
+        </div>
+        <div class="portal-tablewrap">
+          <table class="portal-table tabela-estados" id="tabelaEstados">
+            <thead>
+              <tr>
+                <th scope="col" data-ordenar="nome">Estado <span class="seta">▼</span></th>
+                <th scope="col" class="num" data-ordenar="pdvs">PDVs <span class="seta">▼</span></th>
+                <th scope="col" class="num" data-ordenar="igrejas">Igrejas <span class="seta">▼</span></th>
+                <th scope="col" class="num" data-ordenar="transacoes">Transações <span class="seta">▼</span></th>
+                <th scope="col" class="num" data-ordenar="receita">Receita <span class="seta">▼</span></th>
+                <th scope="col" class="num" data-ordenar="ticket">Ticket médio <span class="seta">▼</span></th>
+                <th scope="col">Participação</th>
+              </tr>
+            </thead>
+            <tbody id="tabelaEstadosCorpo"></tbody>
+            <tfoot id="tabelaEstadosRodape"></tfoot>
+          </table>
+        </div>
+        <p class="muted tabela-rodape">
+          <b>Receita</b> soma apenas transações aprovadas; <b>Transações</b> conta
+          todas as do filtro. PDVs sem Estado no cadastro — ou sem igreja correspondente — ficam na
+          linha <b>Sem localidade</b>, fora do ranking e do gráfico, mas dentro dos totais.
+          A busca só esconde linhas: os totais continuam valendo para o filtro inteiro.
+        </p>
+      </article>
+    </div>
+  </div></section>
+
+</div>
+
+<!-- sobreposição enquanto "Atualizar dados" roda -->
+<div class="loading" id="carregando" hidden>
+  <div class="loading-card">
+    <span class="material-symbols-outlined portal-gira">sync</span>
+    <p id="carregandoTexto">Atualizando os dados…</p>
+  </div>
+</div>
+
+<div id="fallbackHost"></div>
+
+<script>
+  PORTAL_SHELL.init({
+    chave: 'maquinas',
+    titulo: 'Máquinas de Cartões',
+    dashboards: <?!= JSON.stringify(DASHBOARDS) ?>,
+    inicial: 'receita',
+    paginas: [
+      { id: 'receita',    rotulo: 'Análise de Receita',  icone: 'pie_chart' },
+      { id: 'localidade', rotulo: 'PDV por Localidade',  icone: 'location_on' },
+      { id: 'estado',     rotulo: 'Consulta por Estado', icone: 'map' }
+    ],
+    onNavegar: function (id) {
+      try { if (window.App && App.instancia) App.instancia.filtro.irPara(id); } catch (e) { /* ainda sem dados */ }
+    },
+    exportar: [
+      { rotulo: 'Exportar CSV', icone: 'table_chart', fn: function () { App.instancia && App.instancia.dashboard.exportarCsv(); } },
+      { rotulo: 'Imprimir',     icone: 'print',       fn: function () { window.print(); } }
+    ],
+    atualizar: function () { return App.instancia.carga.carregar(true); }
+  });
+</script>
+
+<?!= include('dash_maquinas_js_base') ?>
+<?!= include('dash_maquinas_js_models') ?>
+<?!= include('dash_maquinas_js_views') ?>
+<?!= include('dash_maquinas_js_controllers') ?>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portal Financeiro · Entrar</title>
+<?!= include('portal_logo') ?>
+<style>
+  .logo-selo{width:72px;height:72px;border-radius:16px;background:#fff;display:grid;place-items:center;margin-bottom:14px;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+  .logo-selo .logo-portal{width:56px;height:56px}
+  :root{--bg:#f1f5f9;--card:#fff;--tx:#0f172a;--mut:#64748b;--bd:#e2e8f0;--a1:#0f172a;--a2:#1d3a80;--ac:#2563eb}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#111a2e;--tx:#e5edf9;--mut:#94a3b8;--bd:#22304d;--ac:#60a5fa}}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
+  .card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--bd);border-radius:18px;overflow:hidden;box-shadow:0 20px 50px rgba(15,23,42,.15)}
+  .topo{padding:32px 28px;color:#fff;background:linear-gradient(135deg,var(--a1),var(--a2))}
+  .logo{width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.16);display:grid;place-items:center;font-weight:800;font-size:20px;margin-bottom:14px}
+  h1{margin:0;font-size:22px}
+  .topo p{margin:4px 0 0;opacity:.8;font-size:14px}
+  .corpo{padding:28px}
+  .lbl{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+  .email{margin:6px 0 22px;padding:12px 14px;border:1px solid var(--bd);border-radius:10px;font-weight:600;word-break:break-all}
+  button{width:100%;padding:13px;border:0;border-radius:10px;background:var(--ac);color:#fff;font:600 16px inherit;font-family:inherit;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  .nota{margin:16px 0 0;font-size:13px;color:var(--mut);text-align:center}
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="topo">
+      <div class="logo-selo"><div class="logo-portal" role="img" aria-label="Logo"></div></div>
+      <h1>Dashboards Financeiros</h1>
+      <p>Controladoria e Financeiro</p>
+    </div>
+    <div class="corpo">
+      <div class="lbl">Conectado como</div>
+      <div class="email"><?= EMAIL ?></div>
+      <button type="button" id="entrar" autofocus>Entrar</button>
+      <p class="nota">O acesso usa sua conta Google @empresa.exemplo.com. Não é preciso digitar senha.</p>
+    </div>
+  </main>
+  <script>
+    document.getElementById('entrar').addEventListener('click', function () {
+      window.top.location.href = <?!= JSON.stringify(APP_URL) ?> + '?p=home';
+    });
+  </script>
+</body>
+</html>

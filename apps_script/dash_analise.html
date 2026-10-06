@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Análise Semanal · Portal Financeiro</title>
+<?!= include('shell_portal') ?>
+<?!= include('portal_dados') ?>
+<style>
+/* Estilos próprios da Análise Semanal (prefixo .an-). Cores só por variáveis do shell (claro/escuro). */
+#portal-conteudo [hidden], #filtros [hidden]{display:none!important}
+#portal-conteudo :focus-visible, #filtros :focus-visible{outline:2px solid var(--secondary);outline-offset:2px}
+
+#portal-conteudo .portal-btn.primario{color:var(--on-primary)}
+
+/* KPIs */
+.an-kpis{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.an-kpis.k5{grid-template-columns:minmax(0,1.5fr) repeat(4,minmax(0,1fr))}
+.an-kpis .valor{font-size:20px;line-height:28px;white-space:nowrap}
+.an-kpis .hero .valor{font-size:28px;line-height:36px}
+.an-kpis .portal-kpi.hero .valor{white-space:nowrap}
+.an-kpis .an-kpi-bad .valor{color:var(--bad)}
+.an-spark{width:100%;height:44px;display:block}
+.an-spark .ar{fill:var(--on-inverse);opacity:.14}
+.an-spark .ln{fill:none;stroke:var(--on-inverse);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+@media (max-width:1180px){.an-kpis.k5{grid-template-columns:repeat(2,minmax(0,1fr))} .an-kpis.k5>:first-child{grid-column:span 2}}
+@media (max-width:480px){.an-kpis.k5{grid-template-columns:minmax(0,1fr)} .an-kpis.k5>:first-child{grid-column:auto}}
+
+/* distribuição diária */
+.an-dias{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+@media (max-width:900px){.an-dias{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}}
+.an-dia{border:1px solid var(--outline-variant);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px;background:var(--lowest);min-width:0}
+.an-dia.pico{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad);background:color-mix(in srgb,var(--bad-bg) 55%,var(--lowest))}
+.an-dia .hd{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;min-height:34px}
+.an-dia .nm{font-weight:600;font-size:13px;line-height:16px}
+.an-dia .dt{font-size:11px;color:var(--on-variant)}
+.an-dia .pc{font-size:11px;font-weight:600;color:var(--on-variant);text-align:right}
+.an-dia .bv{height:96px;display:flex;align-items:flex-end;justify-content:center;background:var(--low);border-radius:8px;padding:0 24%}
+.an-dia .bv i{display:block;width:100%;min-height:2px;border-radius:6px 6px 0 0;background:var(--graf-1)}
+.an-dia.pico .bv i{background:var(--bad)}
+.an-dia .vl{font-weight:700;font-size:14px;line-height:18px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.an-dia .q{font-size:11px;color:var(--on-variant)}
+
+/* tabelas */
+.an-t th,.an-t td{white-space:nowrap}
+.portal-table td.an-co{white-space:normal;min-width:200px;max-width:320px;font-weight:600}
+.an-sub{display:block;margin-top:2px;font-size:11.5px;font-weight:400;color:var(--on-variant);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px}
+.an-zero{color:var(--outline)}
+.an-t.stk th:first-child,.an-t.stk td:first-child{position:sticky;left:0;z-index:2;background:var(--lowest);border-right:1px solid color-mix(in srgb,var(--outline-variant) 50%,transparent)}
+.an-t.stk th:first-child{background:var(--low);z-index:3}
+.an-t.stk tfoot td:first-child{background:var(--container)}
+.an-bar{height:4px;min-width:90px;border-radius:999px;background:var(--container);overflow:hidden;margin-top:6px}
+.an-bar i{display:block;height:100%;border-radius:999px;background:var(--graf-1)}
+.portal-table tr.an-alerta{background:color-mix(in srgb,var(--bad) 6%,transparent)}
+.portal-table tr.an-conf-ok{background:color-mix(in srgb,var(--ok) 10%,transparent)}
+.portal-table tr.an-conf-ver{background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.an-hoje{color:var(--bad);font-weight:600}
+.an-bold{font-weight:700}
+.an-acao{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--outline-variant);background:var(--lowest);font-size:12px;font-weight:600;white-space:nowrap}
+.an-acao:hover{background:var(--low)}
+.an-sm{font-size:16px!important}
+.an-chev{color:var(--outline);transition:transform .18s}
+.an-group{cursor:pointer}
+.an-group:hover .an-chev,.an-group.open .an-chev{color:var(--secondary)}
+.an-group.open .an-chev{transform:rotate(90deg)}
+.an-gl{display:inline-flex;align-items:center;gap:10px}
+.portal-table tr.an-child{background:var(--low)}
+.portal-table tr.an-child td{font-size:12.5px;color:var(--on-variant);border-bottom:1px dashed var(--outline-variant)}
+.portal-table tr.an-child td:first-child{padding-left:44px}
+.portal-table tr.an-child:hover{background:var(--container)}
+
+/* conferência (tokens ok/warn/bad) */
+.an-confw{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:200px}
+.an-conf{height:30px;padding:0 10px;border-radius:999px;border:1px solid var(--outline-variant);background:var(--lowest);color:var(--on-surface);font-size:12px;font-weight:600;cursor:pointer;max-width:100%}
+.an-conf[data-estado=""]{background:var(--warn-bg);color:var(--warn);border-color:transparent}
+.an-conf[data-estado="ok"]{background:var(--ok-bg);color:var(--ok);border-color:transparent}
+.an-conf[data-estado="ver"]{background:var(--bad-bg);color:var(--bad);border-color:transparent}
+.an-conf:focus{outline:2px solid var(--secondary);outline-offset:1px}
+.an-conf option{background:var(--lowest);color:var(--on-surface)}
+
+/* controles da página */
+.an-fl{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--on-variant)}
+.an-ctl{gap:12px;flex-wrap:wrap;display:flex;align-items:center}
+.an-seg-ic>button{display:inline-flex;align-items:center;gap:6px}
+.an-seg-ic .material-symbols-outlined{font-size:16px}
+.an-num{width:104px}
+.an-foot{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--on-variant)}
+.an-pag{display:flex;align-items:center;gap:6px}
+.an-pag .portal-btn{width:36px;padding:0;justify-content:center}
+.an-pag .portal-btn:disabled{opacity:.45;cursor:default}
+.an-pag .material-symbols-outlined{font-size:20px}
+
+/* filtros multi-seleção */
+.an-dd{position:relative}
+.an-ddb{display:inline-flex;align-items:center;gap:6px}
+.an-ddb .material-symbols-outlined{font-size:16px}
+.an-cnt{display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 6px;border-radius:999px;background:var(--info-bg);color:var(--info);font-size:10.5px;font-weight:700}
+.an-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:240px;max-width:min(320px,86vw);max-height:320px;overflow:auto;padding:6px;border-radius:10px;background:var(--lowest);border:1px solid var(--outline-variant);box-shadow:var(--sombra);z-index:80}
+.an-menu.open{display:block}
+.an-menu label{display:flex;align-items:center;gap:10px;padding:8px;border-radius:7px;cursor:pointer;font-size:13px}
+.an-menu label:hover{background:var(--low)}
+.an-menu input[type=checkbox]{accent-color:var(--secondary);width:15px;height:15px;flex:none}
+.an-menu .an-vz{color:var(--on-variant);cursor:default}
+.an-acts{display:flex;gap:8px;margin-top:6px;padding-top:8px;border-top:1px solid var(--outline-variant)}
+.an-acts .portal-btn{flex:1;justify-content:center;height:32px}
+.an-busca{min-width:170px}
+
+/* textos de apoio, vazios, listas */
+.an-vz-t{font-weight:600;font-size:15px;color:var(--on-surface);margin-bottom:4px}
+.an-cb{flex:1;min-width:0}
+.an-av{margin-bottom:12px}
+.an-ul{margin:4px 0 0;padding-left:18px;font-size:13px}
+.an-code{background:var(--container);padding:1px 5px;border-radius:4px;font-size:11.5px}
+.an-files{margin:0;padding:0;list-style:none}
+.an-files li{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid color-mix(in srgb,var(--outline-variant) 40%,transparent)}
+.an-files li:last-child{border-bottom:0}
+.an-files .material-symbols-outlined{color:var(--secondary)}
+.an-files .nm{flex:1;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.an-files .meta{font-size:12px;color:var(--on-variant);white-space:nowrap}
+
+/* carregamento */
+.an-carga{display:none;position:fixed;left:276px;right:24px;bottom:20px;z-index:70;padding:12px 16px;border-radius:12px;background:var(--inverse);color:var(--on-inverse);font-size:13px;box-shadow:var(--sombra),0 8px 28px color-mix(in srgb,var(--inverse) 40%,transparent)}
+.an-carga.on{display:block}
+.an-carga.erro{background:var(--bad);color:var(--on-primary)}
+.an-carga .barra{height:5px;border-radius:3px;background:color-mix(in srgb,var(--on-inverse) 22%,transparent);margin-top:8px;overflow:hidden}
+.an-carga .barra i{display:block;height:100%;width:0;background:var(--secondary-container);transition:width .25s}
+.an-carga button{margin-left:12px}
+@media (max-width:1023px){.an-carga{left:12px;right:12px}}
+
+/* modais */
+.an-ov{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:24px;background:color-mix(in srgb,var(--inverse) 62%,transparent)}
+.an-ov.open{display:flex}
+.an-modal{display:flex;flex-direction:column;width:100%;max-width:920px;max-height:86vh;background:var(--lowest);color:var(--on-surface);border:1px solid var(--outline-variant);border-radius:16px;box-shadow:var(--sombra)}
+.an-modal>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--outline-variant)}
+.an-modal>header h3{font-size:16px;font-weight:600}
+.an-modal .body{padding:20px;overflow:auto}
+.an-modal>footer{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding:14px 20px;border-top:1px solid var(--outline-variant)}
+.an-modal textarea{width:100%;height:240px;font:12px/1.4 ui-monospace,Consolas,monospace;background:var(--low);color:var(--on-surface);border:1px solid var(--outline-variant);border-radius:8px;padding:8px}
+.an-maprow{border:1px solid var(--outline-variant);border-radius:8px;padding:16px;background:var(--low)}
+.an-maprow+.an-maprow{margin-top:12px}
+.an-maprow h4{margin:0;font-size:13.5px}
+.an-maprow p{margin:3px 0 14px;font-size:11.5px;color:var(--on-variant)}
+.an-mapgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:12px}
+.an-mapgrid>div{display:flex;flex-direction:column;gap:5px;min-width:0}
+.an-mapgrid label{font-size:11.5px;color:var(--on-variant)}
+.an-mapgrid select{width:100%;max-width:none}
+@media print{.an-carga,.an-ov,.an-menu{display:none!important}}
+</style>
+</head>
+<body>
+<div id="portal-conteudo" hidden>
+
+  <!-- ============ VALORES POR DIA ============ -->
+  <section data-pagina="valores"><div class="portal-page">
+    <div class="portal-pagehead"><div>
+      <h1>Valores por dia</h1>
+      <p id="valores-sub">Montante pago por beneficiário, de segunda a sexta-feira.</p>
+    </div></div>
+    <div id="valores-kpis" class="an-kpis k5"></div>
+    <div class="portal-panel" id="valores-distp" hidden>
+      <div class="cab"><div><div class="t">Distribuição diária</div><div class="s" id="valores-distper"></div></div></div>
+      <div class="an-dias" id="valores-dist"></div>
+    </div>
+    <div class="portal-panel">
+      <div class="cab"><div><div class="t">Pagamentos por dia da semana</div><div class="s" id="valores-periodo"></div></div></div>
+      <div class="portal-tablewrap" id="valores-tabela"></div>
+      <div class="an-foot"><span id="valores-foot"></span></div>
+    </div>
+  </div></section>
+
+  <!-- ============ FREQUÊNCIA ============ -->
+  <section data-pagina="frequencia"><div class="portal-page">
+    <div class="portal-pagehead"><div>
+      <h1>Frequência de pagamentos</h1>
+      <p>Quantidade de transações por empresa na semana. Clique na linha para ver cada pagamento.</p>
+    </div></div>
+    <div id="freq-kpis" class="an-kpis"></div>
+    <div class="portal-panel">
+      <div class="cab"><div><div class="t">Empresas pagas na semana</div><div class="s" id="freq-periodo"></div></div>
+        <div class="portal-seg" id="freq-pills">
+          <button type="button" class="pill" data-freq="todos" aria-pressed="true">Todas</button>
+          <button type="button" class="pill" data-freq="1" aria-pressed="false">Apenas 1</button>
+          <button type="button" class="pill" data-freq="2" aria-pressed="false">Mais de 1</button>
+        </div>
+      </div>
+      <div class="portal-tablewrap" id="freq-tabela"></div>
+      <div class="an-foot"><span id="freq-foot"></span></div>
+    </div>
+  </div></section>
+
+  <!-- ============ STATUS ============ -->
+  <section data-pagina="status"><div class="portal-page">
+    <div class="portal-pagehead"><div>
+      <h1>Monitoramento de status</h1>
+      <p>Empresas acima do limite de alerta recebem sinalização imediata.</p>
+    </div>
+      <span id="conf-aviso" class="portal-chip warn" hidden></span>
+    </div>
+    <div id="status-kpis" class="an-kpis"></div>
+    <div class="portal-panel">
+      <div class="cab"><div><div class="t" id="status-titulo">Situação por empresa</div><div class="s" id="status-periodo"></div></div>
+        <div class="an-ctl">
+          <div class="portal-seg an-seg-ic" id="status-visao">
+            <button type="button" class="pill" data-visao="empresa" aria-pressed="true"><span class="material-symbols-outlined">view_agenda</span>Por empresa</button>
+            <button type="button" class="pill" data-visao="pagamento" aria-pressed="false"><span class="material-symbols-outlined">format_list_bulleted</span>Por pagamento</button>
+          </div>
+          <label class="an-fl">Limite R$ <input id="f-limite" class="portal-input num an-num" type="number" min="0" step="500" value="10000"></label>
+          <label class="an-fl">Conferência
+            <select id="f-conf" class="portal-sel">
+              <option value="todas">Todas</option>
+              <option value="pendentes">Pendentes</option>
+              <option value="verificar">A verificar</option>
+              <option value="autorizados">Autorizadas</option>
+            </select>
+          </label>
+          <div class="portal-seg" id="status-pills">
+            <button type="button" class="pill" data-st="todos" aria-pressed="true">Ver todos</button>
+            <button type="button" class="pill" data-st="abaixo" aria-pressed="false">Normal</button>
+            <button type="button" class="pill" data-st="acima" aria-pressed="false">Alerta</button>
+          </div>
+        </div>
+      </div>
+      <div class="portal-tablewrap" id="status-tabela"></div>
+      <div class="an-foot">
+        <span id="status-foot"></span>
+        <div class="an-pag" id="status-pag" hidden>
+          <button type="button" class="portal-btn" id="pag-ant" aria-label="Página anterior"><span class="material-symbols-outlined">chevron_left</span></button>
+          <button type="button" class="portal-btn" id="pag-prox" aria-label="Próxima página"><span class="material-symbols-outlined">chevron_right</span></button>
+        </div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ============ FONTE DE DADOS ============ -->
+  <section data-pagina="fonte"><div class="portal-page">
+    <div class="portal-pagehead"><div>
+      <h1>Fonte de dados</h1>
+      <p>As planilhas de pagamentos vêm do Drive, sincronizadas pela Controladoria. Um arquivo por ano, ou vários — o dashboard une tudo.</p>
+    </div>
+      <div class="row wrap gap-2">
+        <button type="button" class="portal-btn" id="btn-salvar-rev"><span class="material-symbols-outlined">download</span>Salvar conferências</button>
+        <label class="portal-btn" for="in-rev" style="cursor:pointer"><span class="material-symbols-outlined">upload_file</span>Carregar conferências</label>
+        <input id="in-rev" type="file" class="sr" accept=".json,application/json">
+        <button type="button" class="portal-btn" id="btn-limpar-rev" hidden></button>
+        <button type="button" class="portal-btn" id="btn-map"><span class="material-symbols-outlined">tune</span>Ajustar colunas</button>
+        <button type="button" class="portal-btn primario" id="btn-refresh"><span class="material-symbols-outlined">sync</span>Atualizar</button>
+      </div>
+    </div>
+    <div class="portal-callout info" id="cache-info"></div>
+    <div class="portal-callout info" id="rev-info">
+      <div class="ic"><span class="material-symbols-outlined">check_circle</span></div>
+      <div class="an-cb"><b>Conferências.</b> <span id="rev-estado">Nenhuma marcação ainda.</span>
+        Elas são gravadas no servidor e valem para todos os usuários. Só a situação (Pendente, Autorizado ou Verificar com o departamento) é guardada.
+        <b>Salvar conferências</b> gera um backup <code class="an-code">.json</code>; <b>Carregar conferências</b> envia um backup ao servidor.</div>
+    </div>
+    <div class="portal-callout info" id="auto-hint">
+      <div class="ic"><span class="material-symbols-outlined">info</span></div>
+      <div class="an-cb" id="auto-hint-text"></div>
+    </div>
+    <div class="portal-panel">
+      <div class="cab"><div><div class="t">Planilhas carregadas</div></div></div>
+      <ul class="an-files" id="filelist"></ul>
+    </div>
+    <div class="portal-panel">
+      <div class="cab"><div><div class="t">Colunas reconhecidas na planilha</div>
+        <div class="s">Os nomes das colunas são reconhecidos automaticamente. Se algum não for encontrado, use “Ajustar colunas”.</div></div></div>
+      <div class="portal-tablewrap" id="schema-tabela"></div>
+    </div>
+  </div></section>
+
+  <!-- janelas e avisos -->
+  <div class="an-ov" id="map-overlay">
+    <div class="an-modal" role="dialog" aria-modal="true" aria-labelledby="map-title">
+      <header>
+        <h3 id="map-title">Ajustar colunas</h3>
+        <button type="button" class="portal-btn" id="map-close" aria-label="Fechar"><span class="material-symbols-outlined">close</span></button>
+      </header>
+      <div class="body" id="map-body"></div>
+      <footer>
+        <button type="button" class="portal-btn" id="map-cancel">Cancelar</button>
+        <button type="button" class="portal-btn primario" id="map-save">Aplicar e recalcular</button>
+      </footer>
+    </div>
+  </div>
+  <div class="an-ov" id="dl-overlay">
+    <div class="an-modal" role="dialog" aria-modal="true" aria-labelledby="dl-nome">
+      <header><h3>Copiar exportação</h3></header>
+      <div class="body">
+        <p>O navegador não permitiu baixar o arquivo <b id="dl-nome"></b>. Copie o conteúdo abaixo e cole num arquivo, ou abra em nova aba.</p>
+        <textarea id="dl-texto" readonly></textarea>
+      </div>
+      <footer>
+        <button type="button" class="portal-btn" id="dl-abrir">Abrir em nova aba</button>
+        <button type="button" class="portal-btn primario" id="dl-copiar">Copiar</button>
+        <button type="button" class="portal-btn" id="dl-fechar">Fechar</button>
+      </footer>
+    </div>
+  </div>
+  <div class="an-carga" id="carga" role="status" aria-live="polite"><span id="carga-txt"></span><button type="button" class="portal-btn" id="carga-retry" hidden>Tentar de novo</button><div class="barra"><i id="carga-bar"></i></div></div>
+</div>
+
+<script>
+/* ============================================================
+   Dashboard de pagamentos semanais — núcleo
+   Versão Apps Script: os dados vêm do Drive via PORTAL.carregar('analise').
+   ============================================================ */
+"use strict";
+
+const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho",
+  "Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const MES_CURTO = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+const DIAS = ["Segunda","Terça","Quarta","Quinta","Sexta"];
+const SEMANA_NOME = ["Primeira semana","Segunda semana","Terceira semana","Quarta semana","Quinta semana"];
+
+const CAMPOS = {
+  data:         { rotulo:"Data", obrig:true,
+                  chaves:["data pagamento","data de pagamento","data do pagamento","dt pagamento","data baixa","data","dt","vencimento","pagamento em","competencia"] },
+  empresa:      { rotulo:"Beneficiário", obrig:true,
+                  chaves:["beneficiario","empresa","fornecedor","razao social","credor","cliente","nome fornecedor","destinatario","favorecido"] },
+  favorecido:   { rotulo:"Favorecido", obrig:false,
+                  chaves:["favorecido","nome favorecido","favorecido pagamento","titular","conta favorecido"] },
+  valor:        { rotulo:"Valor", obrig:true,
+                  chaves:["valor pago","valor do pagamento","valor liquido","montante","valor total","valor","vlr","total pago","total"] },
+  banco:        { rotulo:"Banco", obrig:false,
+                  chaves:["banco","instituicao financeira","instituicao","bco","conta bancaria","banco pagador"] },
+  departamento: { rotulo:"Departamento", obrig:false,
+                  chaves:["departamento solicitante","departamento","depto","setor","area solicitante","area","solicitante","requisitante","centro de custo","cc"] },
+  natureza:     { rotulo:"Descrição das naturezas", obrig:false,
+                  chaves:["descricao das naturezas","descricao da natureza","naturezas","natureza da despesa","natureza","rubrica","conta contabil","classificacao"] },
+  descricao:    { rotulo:"Descrição / documento", obrig:false,
+                  chaves:["descricao","historico","observacao","obs","documento","nota fiscal","nf","titulo","referencia","finalidade"] }
+};
+const CAMPO_IDS = Object.keys(CAMPOS);
+
+/* ---------------- Estado ---------------- */
+const S = {
+  recs: [],            // registros normalizados
+  arquivos: [],        // {nome, caminho, tamanho, mtime, abas:[...]}
+  cruas: new Map(),    // "arquivo::aba" -> {aoa, headerRow, headers, assinatura}
+  overrides: {},       // assinatura -> {campo: indiceColuna}
+  geradoEm: null, erroCarga: "", origemTipo: null, origemNome: "",
+  ultimaLeitura: null,
+  assinaturaPasta: "",
+  view: "valores",
+  filtros: { ano:"todos", mes:"todos", semana:"todas", deps:new Set(), bancos:new Set(),
+             naturezas:new Set(), grupo:"empresa", busca:"", freq:"todos", st:"todos",
+             conf:"todas", limite:10000 },
+  rotulos: { empresa:"Empresa", favorecido:"" },
+  abertos: new Set(),  // empresas expandidas na página de frequência
+  statusVisao: "empresa",
+  revisoes: {},        // chave do pagamento -> { e:"ok"|"ver", q:ISO, n:responsável }
+  usuario: "",
+  pag: 1,
+  avisos: []
+};
+
+/* ---------------- Utilidades ---------------- */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const norm = s => String(s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+  .replace(/[^a-z0-9]+/g," ").trim();
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtN = new Intl.NumberFormat("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const brl = v => "R$ " + fmtN.format(v || 0);
+const brlCurto = v => {
+  const a = Math.abs(v||0);
+  if (a >= 1e6) return "R$ " + fmtN.format(v/1e6).replace(",00","") + " mi";
+  if (a >= 1e3) return "R$ " + new Intl.NumberFormat("pt-BR",{maximumFractionDigits:1}).format(v/1e3) + " mil";
+  return brl(v);
+};
+const dataBR = d => String(d.getDate()).padStart(2,"0") + " " + MES_CURTO[d.getMonth()] + " " + d.getFullYear();
+/* Ícones: Material Symbols (carregado pelo shell). */
+const ICONES = { "i-vazio":"inbox", "i-alert":"warning", "i-aviso":"warning", "i-arrow":"subdirectory_arrow_right",
+  "i-chev":"chevron_right", "i-check":"check_circle", "i-info":"info", "i-file":"description", "i-close":"close",
+  "i-up":"trending_up", "i-down":"trending_down" };
+const svg = (id,cls) => `<span class="material-symbols-outlined ${cls||""}" aria-hidden="true">${ICONES[id] || "circle"}</span>`;
+
+function toast(msg){ if (window.PORTAL_SHELL) PORTAL_SHELL.toast(msg); }
+/* Semanas do mês em blocos de segunda a domingo. Um pedaço solto no começo ou no
+   fim do mês, formado apenas por sábado e domingo, é incorporado à semana vizinha —
+   sem isso, um mês que começa no domingo criaria uma "primeira semana" de um dia só
+   e o mês passaria a ter seis semanas. Assim a contagem vai de 1 a 5, e o dia 1º
+   está sempre na primeira semana. */
+const _semanasCache = new Map();
+function mapaSemanas(ano, mes){
+  const chave = ano + "-" + mes;
+  if (_semanasCache.has(chave)) return _semanasCache.get(chave);
+  const totalDias = new Date(ano, mes + 1, 0).getDate();
+  const blocos = [];
+  let atual = null;
+  for (let dia = 1; dia <= totalDias; dia++){
+    const du = (new Date(ano, mes, dia).getDay() + 6) % 7;   // segunda = 0
+    if (!atual || du === 0){ atual = { dias:[], util:false }; blocos.push(atual); }
+    atual.dias.push(dia);
+    if (du <= 4) atual.util = true;
+  }
+  if (blocos.length > 1 && !blocos[0].util){
+    blocos[1].dias = blocos[0].dias.concat(blocos[1].dias);
+    blocos.shift();
+  }
+  if (blocos.length > 1 && !blocos[blocos.length - 1].util){
+    const ultimo = blocos.pop();
+    blocos[blocos.length - 1].dias = blocos[blocos.length - 1].dias.concat(ultimo.dias);
+  }
+  const mapa = {};
+  blocos.forEach((b, i) => b.dias.forEach(dia => { mapa[dia] = i + 1; }));
+  _semanasCache.set(chave, mapa);
+  return mapa;
+}
+function semanaDoMes(d){
+  return mapaSemanas(d.getFullYear(), d.getMonth())[d.getDate()];
+}
+const diaUtil = d => (d.getDay() + 6) % 7;          // 0=seg ... 6=dom
+
+/* ---------------- Conversões ---------------- */
+function paraData(v){
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  if (typeof v === "number" && v > 20000 && v < 80000){
+    const ms = Math.round((v - 25569) * 86400000);
+    const d = new Date(ms);
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  if (typeof v === "string"){
+    const s = v.trim();
+    let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (m){
+      let [_,dd,mm,aa] = m; aa = +aa; if (aa < 100) aa += aa < 50 ? 2000 : 1900;
+      const d = new Date(aa, +mm - 1, +dd);
+      return isNaN(d) ? null : d;
+    }
+    m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  }
+  return null;
+}
+function paraNumero(v){
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  if (v == null) return null;
+  let s = String(v).trim();
+  if (!s) return null;
+  const neg = /^\(.*\)$/.test(s) || /-/.test(s.replace(/[^\d\-]/g,"").slice(0,1));
+  s = s.replace(/[R$\s\u00a0()]/gi,"").replace(/[^\d.,\-]/g,"");
+  if (!s) return null;
+  const ultVirg = s.lastIndexOf(","), ultPonto = s.lastIndexOf(".");
+  if (ultVirg > -1 && ultPonto > -1){
+    s = ultVirg > ultPonto ? s.replace(/\./g,"").replace(",",".") : s.replace(/,/g,"");
+  } else if (ultVirg > -1){
+    s = /,\d{3}$/.test(s) && /^\d{1,3}(,\d{3})+$/.test(s) ? s.replace(/,/g,"") : s.replace(",",".");
+  } else if (ultPonto > -1 && /^\-?\d{1,3}(\.\d{3})+$/.test(s)){
+    s = s.replace(/\./g,"");
+  }
+  const n = parseFloat(s);
+  if (!isFinite(n)) return null;
+  return neg && n > 0 ? -n : n;
+}
+
+/* ---------------- Detecção de colunas ---------------- */
+function pontuaCabecalho(linha){
+  let p = 0;
+  linha.forEach(c => {
+    const n = norm(c);
+    if (!n) return;
+    for (const id of CAMPO_IDS)
+      if (CAMPOS[id].chaves.some(k => n === k || n.includes(k))) { p++; break; }
+  });
+  return p;
+}
+function achaCabecalho(aoa){
+  let melhor = -1, pontos = 0;
+  for (let i = 0; i < Math.min(20, aoa.length); i++){
+    const p = pontuaCabecalho(aoa[i] || []);
+    if (p > pontos){ pontos = p; melhor = i; }
+  }
+  return pontos >= 2 ? melhor : -1;
+}
+function mapeia(headers){
+  const usados = new Set(), mapa = {};
+  for (const id of CAMPO_IDS){
+    let escolha = -1, melhorPeso = -1;
+    headers.forEach((h,i) => {
+      if (usados.has(i)) return;
+      const n = norm(h);
+      if (!n) return;
+      CAMPOS[id].chaves.forEach((k,ordem) => {
+        let peso = -1;
+        if (n === k) peso = 1000 - ordem;
+        else if (n.startsWith(k) || n.endsWith(k)) peso = 600 - ordem;
+        else if (n.includes(k)) peso = 300 - ordem;
+        if (peso > melhorPeso){ melhorPeso = peso; escolha = i; }
+      });
+    });
+    if (escolha > -1 && melhorPeso > 0){ mapa[id] = escolha; usados.add(escolha); }
+  }
+  return mapa;
+}
+const assina = headers => headers.map(h => norm(h)).filter(Boolean).join("|").slice(0,300);
+
+/* ---------------- Leitura dos arquivos ---------------- */
+function anoDoNome(nome){
+  const m = String(nome).match(/(20\d{2})/);
+  return m ? +m[1] : null;
+}
+/* O workbook já vem pronto do Drive (PORTAL.carregar). `item` = { nome, relPath, mtime, workbook }.
+   Daqui em diante o pipeline é o mesmo do dashboard original. */
+function leWorkbook(item){
+  const wb = item.workbook;
+  const caminho = item.relPath || item.nome;
+  const abas = [];
+  wb.SheetNames.forEach(nomeAba => {
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba], { header:1, raw:true, defval:null, blankrows:false });
+    if (!aoa.length) return;
+    const hr = achaCabecalho(aoa);
+    if (hr < 0){
+      const largura = Math.max(...aoa.map(l => (l || []).filter(c => c != null && c !== "").length));
+      abas.push({ nome:nomeAba, ok:false, motivo:"cabeçalho não reconhecido", registros:0,
+                  silencioso: aoa.length < 4 || largura < 3 });
+      return;
+    }
+    const headers = (aoa[hr] || []).map((h,i) => (norm(h) ? String(h).trim() : "Coluna " + (i+1)));
+    const chave = caminho + "::" + nomeAba;
+    S.cruas.set(chave, { aoa, hr, headers, assinatura:assina(headers), arquivo:caminho, aba:nomeAba });
+    abas.push({ nome:nomeAba, ok:true, chave, headers, registros:0 });
+  });
+  return { nome:item.nome || caminho, caminho, tamanho:0,
+           mtime:item.mtime ? new Date(item.mtime * 1000) : null,
+           anoNome:anoDoNome(caminho), abas };
+}
+function reconstroi(){
+  S.recs = []; S.avisos = []; S.rotulos = { empresa:"Empresa", favorecido:"" };
+  for (const arq of S.arquivos){
+    for (const aba of arq.abas){
+      if (!aba.ok) { if (!aba.silencioso) S.avisos.push(`${arq.nome} › ${aba.nome}: ${aba.motivo}.`); continue; }
+      const cru = S.cruas.get(aba.chave);
+      if (!cru) continue;
+      const mapa = Object.assign({}, mapeia(cru.headers), S.overrides[cru.assinatura] || {});
+      aba.mapa = mapa;
+      const faltando = CAMPO_IDS.filter(id => CAMPOS[id].obrig && !(id in mapa));
+      if (faltando.length){
+        aba.registros = 0;
+        S.avisos.push(`${arq.nome} › ${aba.nome}: não encontrei ${faltando.map(f=>CAMPOS[f].rotulo.toLowerCase()).join(" e ")}. Use “Ajustar colunas”.`);
+        continue;
+      }
+      S.rotulos.empresa = cru.headers[mapa.empresa] || "Empresa";
+      if (mapa.favorecido != null) S.rotulos.favorecido = cru.headers[mapa.favorecido];
+      let n = 0, ignorados = 0;
+      for (let i = cru.hr + 1; i < cru.aoa.length; i++){
+        const linha = cru.aoa[i] || [];
+        const empresa = String(linha[mapa.empresa] ?? "").trim();
+        const data = paraData(linha[mapa.data]);
+        const valor = paraNumero(linha[mapa.valor]);
+        if (!empresa || !data || valor == null){ if (linha.some(c => c != null && c !== "")) ignorados++; continue; }
+        const en = norm(empresa);
+        if (/^(total|subtotal|soma|geral|totais)\b/.test(en)) continue;
+        S.recs.push({
+          data, empresa, valor,
+          banco: mapa.banco != null ? (String(linha[mapa.banco] ?? "").trim() || "Não informado") : "Não informado",
+          depto: mapa.departamento != null ? (String(linha[mapa.departamento] ?? "").trim() || "Não informado") : "Não informado",
+          favorecido: mapa.favorecido != null ? String(linha[mapa.favorecido] ?? "").trim() : "",
+          natureza: mapa.natureza != null ? (String(linha[mapa.natureza] ?? "").trim() || "Não informada") : "Não informada",
+          desc:  mapa.descricao != null ? String(linha[mapa.descricao] ?? "").trim() : "",
+          ano: data.getFullYear(), mes: data.getMonth(), semana: semanaDoMes(data), dia: diaUtil(data),
+          origem: arq.nome, aba: aba.nome
+        });
+        n++;
+      }
+      aba.registros = n; aba.ignorados = ignorados;
+    }
+  }
+  S.recs.sort((a,b) => a.data - b.data || a.empresa.localeCompare(b.empresa,"pt-BR"));
+  aplicaChaves(S.recs);
+  S.ultimaLeitura = new Date();
+}
+
+/* Identidade de cada pagamento para a conferência. Não usa o número da linha:
+   a planilha é relida a cada atualização e as linhas mudam de lugar. Lançamentos
+   idênticos no mesmo dia são separados pela ordem de ocorrência. */
+function aplicaChaves(recs){
+  const cont = new Map();
+  for (const r of recs){
+    const base = [
+      r.data.getFullYear() * 10000 + (r.data.getMonth() + 1) * 100 + r.data.getDate(),
+      norm(r.empresa), Math.round(r.valor * 100), norm(r.banco), norm(r.natureza)
+    ].join("|");
+    const n = (cont.get(base) || 0) + 1;
+    cont.set(base, n);
+    r.chaveRev = base + "#" + n;
+  }
+}
+const revisaoDe = r => S.revisoes[r.chaveRev] || null;
+/* A conferência de uma empresa é sempre guardada na semana a que o pagamento
+   pertence — nunca no recorte que estava na tela. Assim, marcar na semana 2 de
+   março continua valendo quando o filtro está em "todos os meses", e marcar na
+   visão geral desce para cada semana em que a empresa recebeu. */
+function chaveSemana(nome, ano, mes, semana){
+  return ["EMP", norm(nome), ano, mes, semana, S.filtros.grupo].join("|");
+}
+/* As semanas que a linha da empresa representa no recorte atual. */
+function semanasDaEmpresa(e){
+  const chaves = new Set();
+  for (const r of e.recs) chaves.add(chaveSemana(e.empresa, r.ano, r.mes, r.semana));
+  return [...chaves];
+}
+/* Situação consolidada: autorizada só quando todas as semanas estão autorizadas;
+   basta uma a verificar para a linha inteira pedir verificação. */
+function estadoEmpresa(e){
+  const chaves = semanasDaEmpresa(e);
+  const revs = chaves.map(k => S.revisoes[k]).filter(Boolean);
+  const ok = revs.filter(r => r.e === "ok").length;
+  const ver = revs.filter(r => r.e === "ver").length;
+  const total = chaves.length;
+  const estado = ver ? "ver" : (ok === total && total ? "ok" : "");
+  const ultima = revs.slice().sort((x,y) => String(y.q||"").localeCompare(String(x.q||"")))[0] || null;
+  return { chaves, estado, ok, ver, total, parcial: ok > 0 && ok < total && !ver, ultima };
+}
+function defineRevisaoEmpresa(e, estado){
+  semanasDaEmpresa(e).forEach(k => defineRevisao(k, estado));
+}
+const estadoRevisao = r => (revisaoDe(r) || {}).e || "";
+
+/* ---------------- Filtros ---------------- */
+function opcoes(){
+  const anos = [...new Set(S.recs.map(r => r.ano))].sort((a,b) => b - a);
+  const f = S.filtros;
+  const noAno = S.recs.filter(r => f.ano === "todos" || r.ano === +f.ano);
+  const meses = [...new Set(noAno.map(r => r.mes))].sort((a,b) => a - b);
+  const noMes = noAno.filter(r => f.mes === "todos" || r.mes === +f.mes);
+  const semanas = [...new Set(noMes.map(r => r.semana))].sort((a,b) => a - b);
+  const deps = [...new Set(S.recs.map(r => r.depto))].sort((a,b) => a.localeCompare(b,"pt-BR"));
+  const bancos = [...new Set(S.recs.map(r => r.banco))].sort((a,b) => a.localeCompare(b,"pt-BR"));
+  const naturezas = [...new Set(S.recs.map(r => r.natureza))].sort((a,b) => a.localeCompare(b,"pt-BR"));
+  return { anos, meses, semanas, deps, bancos, naturezas };
+}
+function filtra(opts = {}){
+  const f = S.filtros;
+  return S.recs.filter(r => {
+    if (f.ano !== "todos" && r.ano !== +f.ano) return false;
+    if (f.mes !== "todos" && r.mes !== +f.mes) return false;
+    if (f.semana !== "todas" && r.semana !== +f.semana) return false;
+    if (f.deps.size && !f.deps.has(r.depto)) return false;
+    if (f.naturezas.size && !f.naturezas.has(r.natureza)) return false;
+    if (!opts.ignoraBanco && f.bancos.size && !f.bancos.has(r.banco)) return false;
+    if (!opts.ignoraBusca && f.busca && !norm(chaveGrupo(r)).includes(norm(f.busca))) return false;
+    return true;
+  });
+}
+function contraparte(r){
+  const outro = S.filtros.grupo === "favorecido" ? r.empresa : (r.favorecido || "");
+  return outro && norm(outro) !== norm(chaveGrupo(r)) ? outro : "";
+}
+function chaveGrupo(r){
+  return S.filtros.grupo === "favorecido" && r.favorecido ? r.favorecido : r.empresa;
+}
+const rotuloGrupo = () => S.filtros.grupo === "favorecido" && S.rotulos.favorecido
+  ? S.rotulos.favorecido : (S.rotulos.empresa || "Empresa");
+
+function porEmpresa(recs){
+  const m = new Map();
+  for (const r of recs){
+    const chave = chaveGrupo(r);
+    let e = m.get(chave);
+    if (!e){ e = { empresa:chave, dias:[0,0,0,0,0,0,0], qtdDias:[0,0,0,0,0,0,0],
+                   total:0, qtd:0, bancos:new Set(), deps:new Set(), nats:new Set(),
+                   contras:new Set(), recs:[] }; m.set(chave, e); }
+    e.dias[r.dia] += r.valor; e.qtdDias[r.dia]++; e.total += r.valor; e.qtd++;
+    e.bancos.add(r.banco); e.deps.add(r.depto); e.nats.add(r.natureza);
+    if (contraparte(r)) e.contras.add(contraparte(r));
+    e.recs.push(r);
+  }
+  return [...m.values()].sort((a,b) => b.total - a.total || a.empresa.localeCompare(b.empresa,"pt-BR"));
+}
+/* Janela de datas da semana selecionada e a semana imediatamente anterior.
+   Só existe quando ano, mês e semana estão definidos. */
+function janelaSemana(){
+  const f = S.filtros;
+  if (f.ano === "todos" || f.mes === "todos" || f.semana === "todas") return null;
+  const ano = +f.ano, mes = +f.mes, sem = +f.semana;
+  const dias = new Date(ano, mes + 1, 0).getDate();
+  let ini = null, fim = null;
+  for (let d = 1; d <= dias; d++){
+    const data = new Date(ano, mes, d);
+    if (semanaDoMes(data) === sem){ if (!ini) ini = data; fim = data; }
+  }
+  if (!ini) return null;
+  const antFim = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() - 1);
+  const antIni = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() - 7);
+  return { ini, fim, antIni, antFim };
+}
+/* Mesmos filtros de dimensão, mas na semana anterior. */
+function totalSemanaAnterior(){
+  const j = janelaSemana();
+  if (!j) return null;
+  const f = S.filtros;
+  const dentro = S.recs.filter(r => r.data >= j.antIni && r.data <= j.antFim
+    && (!f.deps.size || f.deps.has(r.depto))
+    && (!f.naturezas.size || f.naturezas.has(r.natureza))
+    && (!f.bancos.size || f.bancos.has(r.banco))
+    && (!f.busca || norm(chaveGrupo(r)).includes(norm(f.busca))));
+  return { total:dentro.reduce((s,r) => s + r.valor, 0), qtd:dentro.length };
+}
+function variacao(atual, anterior){
+  if (anterior == null || !anterior.total) return "";
+  const p = (atual / anterior.total - 1) * 100;
+  const seta = p >= 0 ? "▲" : "▼";
+  const n = new Intl.NumberFormat("pt-BR",{maximumFractionDigits:1}).format(Math.abs(p));
+  return `${seta} ${n}% vs. semana anterior`;
+}
+
+function rotuloPeriodo(){
+  const f = S.filtros;
+  const p = [];
+  p.push(f.semana === "todas" ? "todas as semanas"
+    : (SEMANA_NOME[f.semana-1] || "semana " + f.semana).toLowerCase());
+  p.push(f.mes === "todos" ? "todos os meses" : MESES[f.mes]);
+  p.push(f.ano === "todos" ? "todos os anos" : f.ano);
+  return p.join(" · ");
+}
+
+/* ============================================================
+   Interface, carregamento de arquivos e atualização
+   ============================================================ */
+
+/* ---------------- Persistência local ----------------
+   Alguns navegadores bloqueiam o armazenamento (modo privado, política
+   corporativa, arquivo aberto de certos caminhos). Tudo passa por este
+   invólucro para que o painel continue funcionando sem ele. */
+const LS = {
+  ok: true,
+  get(k){ try{ return window.localStorage.getItem(k); }catch(e){ LS.ok = false; return null; } },
+  set(k,v){ try{ window.localStorage.setItem(k,v); return true; }catch(e){ if (!/quota/i.test(e.name)) LS.ok = false; return false; } },
+  del(k){ try{ window.localStorage.removeItem(k); }catch(e){} }
+};
+const LS_MAP = "pagamentos.overrides.v1", LS_FILT = "pagamentos.filtros.v1";
+function salvaOverrides(){ LS.set(LS_MAP, JSON.stringify(S.overrides)); }
+function salvaFiltros(){
+  try{
+    const f = S.filtros;
+    LS.set(LS_FILT, JSON.stringify({ ano:f.ano, mes:f.mes, semana:f.semana,
+      deps:[...f.deps], bancos:[...f.bancos], naturezas:[...f.naturezas], grupo:f.grupo,
+      limite:f.limite, freq:f.freq, st:f.st, conf:f.conf, statusVisao:S.statusVisao, view:S.view }));
+  }catch(e){}
+}
+function carregaPrefs(){
+  try{ S.overrides = JSON.parse(LS.get(LS_MAP) || "{}"); }catch(e){ S.overrides = {}; }
+  try{
+    const p = JSON.parse(LS.get(LS_FILT) || "{}");
+    if (p.ano) S.filtros.ano = p.ano;
+    if (p.mes !== undefined) S.filtros.mes = p.mes;
+    if (p.semana) S.filtros.semana = p.semana;
+    if (p.deps) S.filtros.deps = new Set(p.deps);
+    if (p.bancos) S.filtros.bancos = new Set(p.bancos);
+    if (p.naturezas) S.filtros.naturezas = new Set(p.naturezas);
+    if (p.grupo) S.filtros.grupo = p.grupo;
+    if (p.limite) S.filtros.limite = p.limite;
+    if (p.freq) S.filtros.freq = p.freq;
+    if (p.st) S.filtros.st = p.st;
+    if (p.statusVisao) S.statusVisao = p.statusVisao;
+    if (p.conf) S.filtros.conf = p.conf;
+    if (p.view) S.view = p.view;
+  }catch(e){}
+}
+
+/* Sem cópia local dos dados: eles vêm sempre do Drive (PORTAL.carregar) a cada abertura.
+   Só as conferências e o nome do responsável usam o armazenamento do navegador. */
+const LS_REV = "pagamentos.revisoes.v1", LS_USER = "pagamentos.usuario.v1";
+
+/* ---------------- Conferências compartilhadas ----------------
+   As marcas ficam numa planilha Google (servidor, api_conf_ler / api_conf_salvar) e valem
+   para todos os usuários. O localStorage é só cache/fallback: se o servidor falhar, a marca
+   continua na tela, entra na fila (confPend) e é reenviada na próxima tentativa. */
+const CONF_CHAVE = "analise";
+const LS_PEND = "pagamentos.confpend.v1", LS_MIG = "pagamentos.confmig.v1";
+let confPend = new Map();      // k -> string JSON (grava) | null (remove)
+let confErro = "", confOcupado = false, confTimer = null, confRetry = null, confLidas = false, confQuando = null;
+
+function srv(fn, ...args){
+  return new Promise((ok, err) => {
+    try{
+      if (!window.google || !google.script || !google.script.run) throw new Error("servidor indisponível");
+      const r = google.script.run.withSuccessHandler(ok)
+        .withFailureHandler(e => err(new Error((e && e.message) || String(e))));
+      r[fn](...args);
+    }catch(e){ err(e); }
+  });
+}
+const meuEmail = () => (typeof PORTAL !== "undefined" && PORTAL.EMAIL) || "";
+const paraServidor = rev => JSON.stringify({ e:rev.e });   // só o estado: ok | ver
+function deServidor(it){
+  try{
+    const o = JSON.parse(it.v);
+    if (!o || !o.e) return null;
+    return { e:o.e, q:"", n:"", por:"", em:"" };
+  }catch(e){ return null; }
+}
+function cacheLocal(){
+  const ok = LS.set(LS_REV, JSON.stringify(S.revisoes));
+  LS.set(LS_PEND, JSON.stringify([...confPend]));
+  S.revSalvo = ok;
+  return ok;
+}
+function flushRevisoes(){ try{ cacheLocal(); }catch(e){} }
+function confAgenda(ms){ clearTimeout(confTimer); confTimer = setTimeout(confSincroniza, ms); }
+
+/* Junta a lista do servidor com o estado local, preservando o que ainda não foi enviado. */
+function mescla(lista){
+  const novo = {};
+  for (const it of lista){ const r = deServidor(it); if (r) novo[it.k] = r; }
+  for (const [k, v] of confPend){
+    if (v === null) delete novo[k];
+    else if (S.revisoes[k]) novo[k] = S.revisoes[k];
+  }
+  S.revisoes = novo;
+  cacheLocal();
+}
+/* Marcas que só existiam no localStorage deste navegador (versão anterior) sobem uma única vez. */
+function migraLegado(lista){
+  if (LS.get(LS_MIG)) return;
+  const nos = new Set(lista.map(x => x.k));
+  for (const [k, r] of Object.entries(S.revisoes))
+    if (!nos.has(k) && !confPend.has(k)) confPend.set(k, paraServidor(r));
+  LS.set(LS_MIG, "1");
+}
+/* Envia o que está pendente (em lote) ou, sem pendências, apenas relê. */
+async function confSincroniza(){
+  if (confOcupado) return;
+  clearTimeout(confRetry);
+  confOcupado = true;
+  const envio = [...confPend];
+  try{
+    const lista = envio.length
+      ? await srv("api_conf_salvar", CONF_CHAVE, envio.map(([k, v]) => ({ k, v })))
+      : await srv("api_conf_ler", CONF_CHAVE);
+    for (const [k, v] of envio) if (confPend.get(k) === v) confPend.delete(k);
+    if (!confLidas){ confLidas = true; migraLegado(lista); }
+    mescla(lista);
+    confErro = ""; confQuando = new Date();
+  }catch(e){
+    confErro = msgErro(e);
+    confRetry = setTimeout(confSincroniza, 30000);
+    cacheLocal();
+  }finally{
+    confOcupado = false;
+    atualizaConfUI();
+    if (confPend.size && !confErro) confAgenda(50);
+    const ae = document.activeElement;
+    if (!(ae && ae.classList && ae.classList.contains("an-conf"))) render();
+  }
+}
+function atualizaConfUI(){
+  const el = $("#conf-aviso");
+  if (el){
+    el.textContent = confErro
+      ? `Conferências não sincronizadas${confPend.size ? " (" + confPend.size + " pendente(s))" : ""}. Nova tentativa automática.`
+      : (confPend.size ? "Enviando conferências…" : "");
+    el.hidden = !el.textContent;
+    el.title = confErro;
+  }
+  atualizaEstadoRev();
+}
+function carregaRevisoes(){
+  let deLs = null;
+  try{ const t = LS.get(LS_REV); if (t) deLs = JSON.parse(t); }catch(e){}
+  const junta = {};
+  if (deLs) for (const [k, v] of Object.entries(deLs)) if (v && v.e) junta[k] = v;
+  /* Marcas antigas gravadas com o recorte "todos/todas" no lugar da semana não
+     têm como ser reencontradas no novo formato: são descartadas na leitura. */
+  for (const k of Object.keys(junta)){
+    if (!k.startsWith("EMP|")) continue;
+    const p = k.split("|");
+    if (!/^\d+$/.test(p[2] || "") || !/^\d+$/.test(p[3] || "") || !/^\d+$/.test(p[4] || "")) delete junta[k];
+  }
+  S.revisoes = junta;
+  try{ const p = JSON.parse(LS.get(LS_PEND) || "[]"); if (Array.isArray(p)) confPend = new Map(p.filter(x => x[0] in junta || x[1] === null)); }catch(e){}
+  S.revSalvo = !!deLs || LS.ok;
+}
+function atualizaEstadoRev(){
+  const el = $("#rev-estado");
+  if (!el) return;
+  const n = totalRevisoes();
+  let t = n ? `${n} conferência(s) compartilhada(s) com todos os usuários` : "Nenhuma marcação ainda.";
+  if (confQuando) t += ` · sincronizado às ${confQuando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}`;
+  if (confPend.size) t += ` · ${confPend.size} aguardando envio`;
+  el.textContent = t + ".";
+  if (confErro)
+    el.innerHTML = esc(t) + `. <b>Não foi possível sincronizar com o servidor (${esc(confErro)}).</b>
+      As marcas ficam neste navegador e serão reenviadas automaticamente.`;
+}
+function defineRevisao(chave, estado){
+  let rev = null;
+  if (estado) rev = { e:estado, q:new Date().toISOString(), n:"", por:"", em:"" };
+  if (rev) S.revisoes[chave] = rev; else delete S.revisoes[chave];
+  confPend.set(chave, rev ? paraServidor(rev) : null);
+  cacheLocal(); confAgenda(250); atualizaConfUI();
+}
+function limpaRevisoes(){
+  Object.keys(S.revisoes).forEach(k => confPend.set(k, null));
+  S.revisoes = {};
+  cacheLocal(); confAgenda(0); atualizaConfUI();
+  render();
+  toast("Conferências apagadas para todos os usuários.");
+}
+function totalRevisoes(){ return Object.keys(S.revisoes).length; }
+
+function exportaRevisoes(ev){
+  const n = totalRevisoes();
+  if (!n){ toast("Não há conferência marcada para salvar."); return; }
+  const pacote = { v:1, quando:new Date().toISOString(), responsavel:S.usuario || "", revisoes:S.revisoes };
+  baixaArquivo(`conferencias-${new Date().toISOString().slice(0,10)}.json`,
+    JSON.stringify(pacote, null, 1), "application/json", `${n} conferência(s) salvas em arquivo.`, !!(ev && ev.shiftKey));
+}
+/* Download por Blob. O sandbox do Apps Script pode bloquear: se der erro (ou se o
+   usuário segurar Shift), abre uma janela com o texto para copiar / abrir em nova aba. */
+function baixaArquivo(nome, texto, tipo, msgOk, forcaManual){
+  if (!forcaManual){
+    try{
+      const url = URL.createObjectURL(new Blob([texto], { type:tipo + ";charset=utf-8" }));
+      const el = document.createElement("a");
+      el.href = url; el.download = nome; el.rel = "noopener";
+      document.body.appendChild(el); el.click(); el.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast(msgOk + " Se o download não iniciar, segure Shift ao clicar para copiar o conteúdo.");
+      return;
+    }catch(e){}
+  }
+  abreSaida(nome, texto, tipo);
+}
+function abreSaida(nome, texto, tipo){
+  $("#dl-nome").textContent = nome;
+  const ta = $("#dl-texto");
+  ta.value = texto;
+  $("#dl-overlay").classList.add("open");
+  ta.focus(); ta.select();
+  $("#dl-copiar").onclick = async () => {
+    let ok = false;
+    try{ await navigator.clipboard.writeText(texto); ok = true; }catch(e){}
+    if (!ok){ try{ ta.focus(); ta.select(); ok = document.execCommand("copy"); }catch(e){} }
+    toast(ok ? "Conteúdo copiado." : "Não foi possível copiar automaticamente: selecione o texto e use Ctrl+C.");
+  };
+  $("#dl-abrir").onclick = () => {
+    try{
+      const w = window.open(URL.createObjectURL(new Blob([texto], { type:tipo + ";charset=utf-8" })), "_blank");
+      if (!w) toast("O navegador bloqueou a nova aba. Use Copiar.");
+    }catch(e){ toast("Não foi possível abrir nova aba. Use Copiar."); }
+  };
+}
+async function importaRevisoes(file){
+  try{
+    const p = JSON.parse(await file.text());
+    const vindas = p && p.revisoes ? p.revisoes : p;
+    if (!vindas || typeof vindas !== "object") throw new Error("formato não reconhecido");
+    let novas = 0, atualizadas = 0;
+    for (const [k, v] of Object.entries(vindas)){
+      if (!v || !v.e) continue;
+      const atual = S.revisoes[k];
+      const rev = { e:v.e, q:v.q || new Date().toISOString(), n:v.n || "", por:v.por || meuEmail(), em:"" };
+      if (!atual){ S.revisoes[k] = rev; confPend.set(k, paraServidor(rev)); novas++; }
+      else if (String(v.q || "") > String(atual.q || "")){ S.revisoes[k] = rev; confPend.set(k, paraServidor(rev)); atualizadas++; }
+    }
+    cacheLocal(); confAgenda(0); atualizaConfUI();
+    tudo();
+    toast(`${novas} conferência(s) adicionada(s)${atualizadas ? ", " + atualizadas + " atualizada(s)" : ""}.`);
+  }catch(e){
+    toast("Não foi possível ler o arquivo de conferências: " + msgErro(e));
+  }
+}
+
+/* ---------------- Carregamento (Drive via Apps Script) ---------------- */
+function msgErro(e){
+  const m = (e && e.message) || String(e || "");
+  return m || "erro desconhecido";
+}
+const EXT = /\.(xlsx|xlsm|xls|csv)$/i;
+const TEMP = /^~\$|^\./;
+let carregando = false;
+
+function cargaUI(txt, pct, erro, retry){
+  const box = $("#carga");
+  if (!txt){ box.classList.remove("on", "erro"); return; }
+  box.classList.add("on"); box.classList.toggle("erro", !!erro);
+  $("#carga-txt").textContent = txt;
+  $("#carga-retry").hidden = !retry;
+  $("#carga-bar").parentNode.hidden = !!erro;
+  $("#carga-bar").style.width = Math.max(4, Math.min(100, pct || 0)) + "%";
+}
+
+async function carregaDoDrive(avisar){
+  if (carregando) return false;
+  carregando = true;
+  cargaUI("Conectando ao Drive…", 4);
+  try{
+    if (typeof PORTAL === "undefined" || typeof XLSX === "undefined")
+      throw new Error("a biblioteca de dados não foi carregada (verifique a conexão)");
+    const r = await PORTAL.carregar("analise", {
+      cellDates:true,
+      filtro: a => { const n = String(a.relPath || a.arquivo).split("/").pop(); return EXT.test(n) && !TEMP.test(n); },
+      onProgress: (feitos, total) => cargaUI(`Lendo planilhas do Drive… ${feitos} de ${total}`, 10 + feitos / total * 85)
+    });
+    if (!r.itens.length) throw new Error("nenhuma planilha encontrada no Drive");
+    cargaUI("Calculando…", 97);
+    S.cruas.clear(); S.avisos = [];
+    const arquivos = [];
+    for (const it of r.itens){
+      try{ arquivos.push(leWorkbook(it)); }
+      catch(e){ S.avisos.push(`${it.nome}: não foi possível abrir (${msgErro(e)}).`); }
+    }
+    S.arquivos = arquivos;
+    const avisosLeitura = S.avisos.slice();
+    reconstroi();
+    S.avisos = avisosLeitura.concat(S.avisos);
+    S.geradoEm = r.geradoEm ? new Date(r.geradoEm) : null;
+    if (S.geradoEm && isNaN(S.geradoEm)) S.geradoEm = null;
+    S.ultimaLeitura = S.geradoEm || new Date();
+    S.assinaturaPasta = String(r.geradoEm || "");
+    S.origemTipo = "drive"; S.origemNome = arquivos.length + " planilha(s)";
+    S.erroCarga = "";
+    tudo();
+    cargaUI("");
+    if (avisar) toast(`${arquivos.length} arquivo(s) lidos · ${S.recs.length} pagamentos.`);
+    return true;
+  }catch(e){
+    S.erroCarga = msgErro(e);
+    cargaUI("Não foi possível carregar os dados: " + S.erroCarga + (S.recs.length ? " (mostrando os dados anteriores)" : ""), 0, true, true);
+    statusFonte();
+    return false;
+  }finally{
+    carregando = false;
+  }
+}
+function atualizar(){ return carregaDoDrive(true); }
+
+/* Confere de tempos em tempos se o sincronizador publicou dados novos no Drive. */
+async function verificaMudancas(){
+  if (carregando || document.hidden || !S.assinaturaPasta || typeof PORTAL === "undefined") return;
+  try{
+    const m = await PORTAL.listar("analise");
+    if (m && String(m.geradoEm || "") && String(m.geradoEm) !== S.assinaturaPasta){
+      if (await carregaDoDrive(false)) toast("Dados novos no Drive — painel atualizado.");
+    }
+  }catch(e){}
+}
+/* Status de sincronização exibido no menu lateral do shell. */
+function statusFonte(){
+  if (!window.PORTAL_SHELL) return;
+  if (S.erroCarga){ PORTAL_SHELL.setStatus({ erro:S.erroCarga }); return; }
+  if (S.origemTipo === "drive"){
+    const d = S.ultimaLeitura || new Date();
+    const n = S.arquivos.length;
+    PORTAL_SHELL.setStatus({
+      fonte:"Fonte: Google Drive · " + n + " planilha" + (n === 1 ? "" : "s"),
+      dados:d.toLocaleDateString("pt-BR") + " " + d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})
+    });
+  } else PORTAL_SHELL.setStatus({});
+}
+
+/* ---------------- Navegação ---------------- */
+let pronto = false;
+function irPara(v){ PORTAL_SHELL.irPara(v); }
+function aoNavegar(v){
+  S.view = v;
+  if (!pronto) return;
+  salvaFiltros(); render();
+}
+
+/* ---------------- Faixa de filtros (fixa, do shell) ---------------- */
+function montaFiltros(){
+  const faixa = PORTAL_SHELL.filtros;
+  const dd = (id, rot) => `<div class="an-dd"><button type="button" class="portal-sel an-ddb" id="${id}-btn" aria-expanded="false">${rot}
+      <span class="an-cnt" id="${id}-count">Todos</span><span class="material-symbols-outlined">expand_more</span></button>
+      <div class="an-menu" id="${id}-menu"></div></div>`;
+  faixa.innerHTML = `<span class="rot"><span class="material-symbols-outlined">filter_alt</span>Filtros</span>
+    <label class="an-fl">Ano <select class="portal-sel" id="f-ano"></select></label>
+    <label class="an-fl">Mês <select class="portal-sel" id="f-mes"></select></label>
+    <label class="an-fl">Semana do mês <select class="portal-sel" id="f-semana"></select></label>
+    <label class="an-fl" id="grupo-field" hidden>Agrupar por <select class="portal-sel" id="f-grupo"></select></label>
+    ${dd("dep","Departamentos")}${dd("nat","Naturezas")}${dd("banco","Bancos")}
+    <input id="f-busca" class="portal-input an-busca" type="search" placeholder="Filtrar beneficiário" aria-label="Filtrar por nome">
+    <button type="button" class="portal-link" id="btn-limpar" hidden><span class="material-symbols-outlined">close</span>Limpar filtros</button>`;
+}
+
+function renderFiltros(){
+  const o = opcoes(), f = S.filtros;
+  /* Sem dados carregados ainda, as listas estão vazias. Nesse momento os valores
+     guardados são apenas exibidos, nunca sobrescritos — do contrário o mês e a
+     semana escolhidos se perderiam a cada abertura do painel. */
+  const temDados = S.recs.length > 0;
+  const sel = (el, itens, valor, rotulo0) => {
+    const existe = itens.some(i => String(i.v) === String(valor));
+    el.innerHTML = `<option value="${rotulo0.v}">${rotulo0.t}</option>` +
+      itens.map(i => `<option value="${i.v}">${esc(i.t)}</option>`).join("") +
+      (!existe && !temDados && String(valor) !== String(rotulo0.v)
+        ? `<option value="${esc(valor)}">…</option>` : "");
+    el.value = existe || !temDados ? valor : rotulo0.v;
+    return el.value;
+  };
+  const ano = sel($("#f-ano"), o.anos.map(a => ({v:a,t:a})), f.ano, {v:"todos",t:"Todos"});
+  const mes = sel($("#f-mes"), o.meses.map(m => ({v:m,t:MESES[m]})), f.mes, {v:"todos",t:"Todos"});
+  const sem = sel($("#f-semana"), o.semanas.map(s => ({v:s,t:SEMANA_NOME[s-1] || "Semana " + s})), f.semana, {v:"todas",t:"Todas"});
+  if (temDados){ f.ano = ano; f.mes = mes; f.semana = sem; }
+  menuMulti($("#dep-menu"), $("#dep-count"), o.deps, f.deps);
+  menuMulti($("#banco-menu"), $("#banco-count"), o.bancos, f.bancos);
+  menuMulti($("#nat-menu"), $("#nat-count"), o.naturezas, f.naturezas);
+
+  const temFav = !!S.rotulos.favorecido && S.recs.some(r => r.favorecido);
+  $("#grupo-field").hidden = !temFav;
+  if (temFav){
+    $("#f-grupo").innerHTML = `<option value="empresa">${esc(S.rotulos.empresa)}</option>` +
+      `<option value="favorecido">${esc(S.rotulos.favorecido)}</option>`;
+    $("#f-grupo").value = f.grupo;
+  } else if (f.grupo === "favorecido" && S.recs.length){ f.grupo = "empresa"; }
+  $("#f-busca").placeholder = "Filtrar " + rotuloGrupo().toLowerCase();
+  $("#btn-limpar").hidden = !filtrosAtivos();
+}
+function menuMulti(menu, contador, itens, conjunto){
+  if (S.recs.length) [...conjunto].forEach(v => { if (!itens.includes(v)) conjunto.delete(v); });
+  menu.innerHTML = (itens.length ? itens.map(i =>
+      `<label><input type="checkbox" value="${esc(i)}" ${conjunto.has(i) ? "checked" : ""}>${esc(i)}</label>`).join("")
+    : `<label class="an-vz">Sem dados carregados</label>`) +
+    `<div class="an-acts"><button type="button" class="portal-btn" data-all="1">Todos</button><button type="button" class="portal-btn" data-none="1">Limpar</button></div>`;
+  contador.textContent = conjunto.size ? conjunto.size : "Todos";
+}
+
+function filtrosAtivos(){
+  const f = S.filtros;
+  return !!(f.deps.size || f.naturezas.size || f.bancos.size || f.busca ||
+            f.mes !== "todos" || f.semana !== "todas" || f.freq !== "todos" || f.st !== "todos");
+}
+function limpaFiltros(){
+  const f = S.filtros;
+  f.mes = "todos"; f.semana = "todas"; f.busca = ""; f.freq = "todos"; f.st = "todos";
+  f.deps.clear(); f.naturezas.clear(); f.bancos.clear();
+  $("#f-busca").value = "";
+  renderFiltros(); render(); salvaFiltros();
+  toast("Filtros limpos. Ano mantido em " + (f.ano === "todos" ? "todos" : f.ano) + ".");
+}
+
+/* ---------------- Renderização ---------------- */
+function tudo(){ renderFiltros(); render(); renderFonte(); statusFonte(); }
+
+function render(){
+  $("#btn-limpar").hidden = !filtrosAtivos();
+  if (S.view === "valores") renderValores();
+  if (S.view === "frequencia") renderFrequencia();
+  if (S.view === "status") renderStatus();
+  if (S.view === "fonte") renderFonte();
+}
+function vazio(msg, titulo){
+  return `<div class="portal-vazio"><div class="an-vz-t">${esc(titulo || "Nada para mostrar")}</div>
+    <p style="max-width:70ch;margin:0 auto">${msg}</p></div>`;
+}
+function avisos(){
+  if (!S.avisos.length) return "";
+  return `<div class="portal-callout an-av"><div class="ic">${svg("i-alert")}</div><div class="an-cb"><div class="tt">Verifique estes arquivos</div>
+    <ul class="an-ul">${S.avisos.slice(0,6).map(a => `<li>${esc(a)}</li>`).join("")}</ul></div></div>`;
+}
+const nf1 = new Intl.NumberFormat("pt-BR",{maximumFractionDigits:1});
+function kpi(rotulo, valor, nota, alerta, hero, extra){
+  extra = extra || {};
+  return `<div class="portal-kpi ${hero ? "hero" : ""} ${alerta ? "an-kpi-bad" : ""}">
+    <div class="topo-k"><span class="rotulo">${esc(rotulo)}</span>${extra.chip || ""}</div>
+    <div class="valor">${valor}</div>${extra.spark || ""}
+    ${nota ? `<div class="sub">${esc(nota)}</div>` : ""}</div>`;
+}
+/* Mini-gráfico do KPI principal, gerado dos valores reais por dia. As cores vêm do CSS (variáveis),
+   então o modo escuro dispensa redesenho. */
+function sparkline(vals){
+  if (vals.length < 2 || !vals.some(v => v > 0)) return "";
+  const max = Math.max(...vals), min = Math.min(...vals), rng = (max - min) || 1;
+  const pts = vals.map((v,i) => [i / (vals.length - 1) * 100, 36 - (v - min) / rng * 30]);
+  const ln = pts.map((p,i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  return `<svg class="an-spark" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+    <path class="ar" d="${ln} L100 40 L0 40 Z"/><path class="ln" d="${ln}"/></svg>`;
+}
+function chipVariacao(atual, anterior){
+  if (anterior == null || !anterior.total) return "";
+  const p = (atual / anterior.total - 1) * 100;
+  return `<span class="portal-chip info" title="Variação em relação à semana anterior">${svg(p >= 0 ? "i-up" : "i-down")}${p >= 0 ? "+" : "−"}${nf1.format(Math.abs(p))}%</span>`;
+}
+const RDES = { "":"Pendente", ok:"Autorizado", ver:"Verificar com o departamento" };
+const ESTADOS_CONF = [
+  { v:"",    t:"Pendente" },
+  { v:"ok",  t:"Autorizado" },
+  { v:"ver", t:"Verificar com o departamento" }
+];
+/* Conferência da empresa que ficou em alerta no período, com o resumo dos
+   pagamentos que, isoladamente, também passaram do limite (quando houver). */
+function celulaConferenciaEmpresa(e, lim, alerta){
+  if (!alerta) return '<span class="an-sub" style="margin:0">—</span>';
+  const est = estadoEmpresa(e);
+  const atual = est.estado;
+  const acima = e.recs.filter(r => r.valor > lim);
+  let detalhe = "";
+  if (acima.length){
+    const ok = acima.filter(r => estadoRevisao(r) === "ok").length;
+    const ver = acima.filter(r => estadoRevisao(r) === "ver").length;
+    detalhe = `${acima.length} pagamento${acima.length > 1 ? "s" : ""} acima do limite`
+      + (ok ? ` · ${ok} autorizado${ok > 1 ? "s" : ""}` : "")
+      + (ver ? ` · ${ver} a verificar` : "");
+  }
+  return `<div class="an-confw">
+    <select class="an-conf" data-rev-emp="${esc(e.empresa)}" data-estado="${atual}" aria-label="Conferência de ${esc(e.empresa)}"
+      title="Conferência desta empresa em ${esc(rotuloPeriodo())}${
+        est.total > 1 ? " — aplica-se às " + est.total + " semanas do recorte" : ""}">
+      ${ESTADOS_CONF.map(o => `<option value="${o.v}" ${o.v === atual ? "selected" : ""}>${o.t}</option>`).join("")}
+    </select>
+    ${est.total > 1 ? `<span class="an-sub">${
+        est.parcial ? `${est.ok} de ${est.total} semanas conferidas`
+                    : `vale para ${est.total} semanas do recorte`}</span>` : ""}
+    ${detalhe ? `<span class="an-sub">${detalhe}</span>` : ""}
+  </div>`;
+}
+function celulaConferencia(r, rev){
+  const atual = (rev && rev.e) || "";
+  return `<div class="an-confw">
+    <select class="an-conf" data-rev="${esc(r.chaveRev)}" data-estado="${atual}" aria-label="Conferência do pagamento"
+      title="Situação da conferência deste pagamento">
+      ${ESTADOS_CONF.map(o => `<option value="${o.v}" ${o.v === atual ? "selected" : ""}>${o.t}</option>`).join("")}
+    </select>
+  </div>`;
+}
+function chipStatus(alerta){
+  return alerta
+    ? `<span class="portal-chip bad">${svg("i-aviso")}Alerta</span>`
+    : `<span class="portal-chip ok">${svg("i-check")}Normal</span>`;
+}
+const hoje = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+
+/* ----- Página 1: valores por dia ----- */
+let ultimaTabela = { valores:[], frequencia:[], status:[] };
+
+function renderValores(){
+  const recs = filtra();
+  const emp = porEmpresa(recs);
+  const temFds = recs.some(r => r.dia > 4);
+  const cols = [0,1,2,3,4].concat(temFds ? [5] : []);
+  const rotCol = i => i < 5 ? DIAS[i] : "Fim de semana";
+  $("#valores-periodo").textContent = rotuloPeriodo();
+  $("#valores-sub").textContent = `Montante pago por ${rotuloGrupo().toLowerCase()}, de segunda a sexta-feira.`
+    + (S.filtros.bancos.size ? ` Filtrado por ${S.filtros.bancos.size} banco(s).` : "");
+
+  const total = recs.reduce((s,r) => s + r.valor, 0);
+  const porDia = cols.map(i => recs.filter(r => (i === 5 ? r.dia > 4 : r.dia === i)).reduce((s,r) => s + r.valor, 0));
+  const maiorDia = porDia.length ? Math.max(...porDia) : 0;
+  const iMaior = porDia.indexOf(maiorDia);
+  const anterior = totalSemanaAnterior();
+  const chip = chipVariacao(total, anterior);
+  $("#valores-kpis").innerHTML = recs.length ? [
+    kpi("Total pago no período", brl(total), chip ? "vs. semana anterior" : rotuloPeriodo(), false, true,
+        { chip, spark:sparkline(porDia.slice(0,5)) }),
+    kpi("Pagamentos", recs.length.toLocaleString("pt-BR")),
+    kpi(rotuloGrupo() + "s pagos", emp.length.toLocaleString("pt-BR")),
+    kpi("Valor médio", brl(recs.length ? total / recs.length : 0)),
+    kpi("Dia de maior volume", maiorDia ? rotCol(cols[iMaior]) : "—", maiorDia ? brlCurto(maiorDia) : "")
+  ].join("") : "";
+
+  /* distribuição diária: segunda a sexta */
+  const painel = $("#valores-distp");
+  painel.hidden = !recs.length;
+  if (recs.length){
+    const j = janelaSemana();
+    const dataDoDia = i => {
+      if (!j) return "";
+      const d = new Date(j.ini.getFullYear(), j.ini.getMonth(), j.ini.getDate() - diaUtil(j.ini) + i);
+      return d >= j.ini && d <= j.fim ? String(d.getDate()).padStart(2,"0") + "/" + String(d.getMonth()+1).padStart(2,"0") : "";
+    };
+    const rotPico = S.filtros.semana !== "todas" ? "Pico da semana" : "Maior volume";
+    $("#valores-distper").textContent = rotuloPeriodo();
+    $("#valores-dist").innerHTML = [0,1,2,3,4].map(i => {
+      const v = porDia[i] || 0, q = recs.filter(r => r.dia === i).length;
+      const pico = maiorDia > 0 && i === iMaior;
+      const pc = total ? v / total * 100 : 0;
+      const dt = dataDoDia(i);
+      return `<div class="an-dia ${pico ? "pico" : ""}">
+        <div class="hd"><div><div class="nm">${DIAS[i]}</div>${dt ? `<div class="dt">${dt}</div>` : ""}</div>
+          ${pico ? `<span class="portal-chip bad">${rotPico}</span>` : `<span class="pc">${nf1.format(pc)}%</span>`}</div>
+        ${pico ? `<div class="pc" style="text-align:left">${nf1.format(pc)}% do total</div>` : ""}
+        <div class="bv" aria-hidden="true"><i style="height:${maiorDia ? Math.max(v ? 2 : 0, v / maiorDia * 100) : 0}%"></i></div>
+        <div class="vl">${brl(v)}</div>
+        <div class="q">${q} pagamento${q === 1 ? "" : "s"}</div></div>`;
+    }).join("");
+  }
+
+  if (!S.recs.length){ $("#valores-tabela").innerHTML = vazio(S.erroCarga ? "Não foi possível ler os dados do Drive. Use Atualizar para tentar de novo." : "Carregando os dados do Drive…", "Sem planilha carregada"); $("#valores-foot").textContent = ""; return; }
+  if (!recs.length){ $("#valores-tabela").innerHTML = vazio("Nenhum pagamento no período e nos filtros selecionados. Amplie a semana ou limpe os filtros.", "Nada neste recorte"); $("#valores-foot").textContent = ""; return; }
+
+  const maiorCel = Math.max(...emp.map(e => e.total));
+  const linhas = emp.map(e => {
+    const cel = cols.map(i => {
+      const v = i === 5 ? e.dias[5] + e.dias[6] : e.dias[i];
+      const q = i === 5 ? e.qtdDias[5] + e.qtdDias[6] : e.qtdDias[i];
+      if (!v) return `<td class="num an-zero">—</td>`;
+      return `<td class="num">${fmtN.format(v)}${q > 1 ? `<span class="an-sub" style="text-align:right">${q} pagamentos</span>` : ""}</td>`;
+    }).join("");
+    const deps = [...e.deps], nats = [...e.nats];
+    const sub = [deps.slice(0,1).join(""), nats.slice(0,2).join(" · ")].filter(Boolean).join(" · ")
+      + (nats.length > 2 ? " +" + (nats.length - 2) : "");
+    return `<tr>
+      <td class="an-co">${esc(e.empresa)}<span class="an-sub">${esc(sub)}</span></td>
+      ${cel}
+      <td class="num">${fmtN.format(e.total)}
+        <div class="an-bar"><i style="width:${Math.max(2, e.total/maiorCel*100)}%"></i></div></td>
+      <td class="c num">${e.qtd}</td></tr>`;
+  }).join("");
+  const rodape = cols.map((i,k) => `<td class="num">${porDia[k] ? fmtN.format(porDia[k]) : "—"}</td>`).join("");
+
+  $("#valores-tabela").innerHTML = avisos() + `<table class="portal-table an-t stk">
+    <thead><tr><th>${esc(rotuloGrupo())}</th>${cols.map(i => `<th class="num">${rotCol(i)}</th>`).join("")}
+      <th class="num">Total da semana</th><th class="c">Qtd.</th></tr></thead>
+    <tbody>${linhas}</tbody>
+    <tfoot><tr><td>Total geral</td>${rodape}<td class="num">${fmtN.format(total)}</td><td class="c num">${recs.length}</td></tr></tfoot>
+  </table>`;
+  $("#valores-foot").textContent = `${emp.length} × ${rotuloGrupo().toLowerCase()} · ${recs.length} pagamento(s) · ${rotuloPeriodo()}`;
+
+  ultimaTabela.valores = [[rotuloGrupo(), ...cols.map(rotCol), "Total", "Qtd"]]
+    .concat(emp.map(e => [e.empresa, ...cols.map(i => i === 5 ? e.dias[5]+e.dias[6] : e.dias[i]), e.total, e.qtd]))
+    .concat([["Total geral", ...porDia, total, recs.length]]);
+}
+
+/* ----- Página 2: frequência ----- */
+function renderFrequencia(){
+  const f = S.filtros;
+  let emp = porEmpresa(filtra());
+  if (f.freq === "1") emp = emp.filter(e => e.qtd === 1);
+  if (f.freq === "2") emp = emp.filter(e => e.qtd > 1);
+  $("#freq-periodo").textContent = rotuloPeriodo();
+  $$("#freq-pills .pill").forEach(b => b.setAttribute("aria-pressed", b.dataset.freq === f.freq));
+
+  const todas = porEmpresa(filtra());
+  const multi = todas.filter(e => e.qtd > 1);
+  const qtdTotal = todas.reduce((s,e) => s + e.qtd, 0);
+  $("#freq-kpis").innerHTML = todas.length ? [
+    kpi("Pagamentos no período", qtdTotal.toLocaleString("pt-BR"), rotuloPeriodo(), false, true),
+    kpi("Com 1 pagamento", (todas.length - multi.length).toLocaleString("pt-BR"), rotuloGrupo().toLowerCase()),
+    kpi("Com mais de 1 pagamento", multi.length.toLocaleString("pt-BR"),
+        multi.length ? "recorrência a revisar" : "", multi.length > 0),
+    kpi("Média de pagamentos", todas.length ? (qtdTotal/todas.length).toFixed(1).replace(".",",") : "0")
+  ].join("") : "";
+
+  if (!S.recs.length){ $("#freq-tabela").innerHTML = vazio(S.erroCarga ? "Não foi possível ler os dados do Drive. Use Atualizar para tentar de novo." : "Carregando os dados do Drive…", "Sem planilha carregada"); $("#freq-foot").textContent = ""; return; }
+  if (!emp.length){ $("#freq-tabela").innerHTML = vazio("Nenhuma empresa atende a esse recorte de recorrência no período.", "Nada neste recorte"); $("#freq-foot").textContent = ""; return; }
+
+  const linhas = emp.map(e => {
+    const aberto = S.abertos.has(e.empresa);
+    const filhos = aberto ? e.recs.map(r => `<tr class="an-child">
+        <td>${svg("i-arrow","an-sm")} ${esc(r.natureza)}${r.desc ? `<span class="an-sub">${esc(r.desc)}</span>` : ""}</td>
+        <td>${dataBR(r.data)}<span class="an-sub">${DIAS[r.dia] || "Fim de semana"}</span></td>
+        <td>${contraparte(r) ? esc(contraparte(r)) + `<span class="an-sub">${esc(r.depto)}</span>` : esc(r.depto)}</td>
+        <td class="num">${fmtN.format(r.valor)}</td>
+        <td class="c">${esc(r.banco)}</td></tr>`).join("") : "";
+    return `<tr class="an-group ${aberto ? "open" : ""}" data-emp="${esc(e.empresa)}" tabindex="0">
+        <td class="an-co"><span class="an-gl">${svg("i-chev","an-chev")}${esc(e.empresa)}</span></td>
+        <td><span class="portal-chip ${e.qtd > 1 ? "warn" : "info"}">${e.qtd > 1 ? "Múltiplo" : "Único"}</span></td>
+        <td class="num" style="text-align:left">${e.qtd} ${e.qtd > 1 ? "transações" : "transação"}</td>
+        <td class="num">${fmtN.format(e.total)}</td>
+        <td class="c">${esc([...e.bancos].join(", "))}</td></tr>${filhos}`;
+  }).join("");
+
+  $("#freq-tabela").innerHTML = avisos() + `<table class="portal-table an-t">
+    <thead><tr><th>${esc(rotuloGrupo())}</th><th>Recorrência</th><th>Qtd. pagamentos</th>
+      <th class="num">Volume total (R$)</th><th class="c">Banco</th></tr></thead>
+    <tbody>${linhas}</tbody></table>`;
+  $("#freq-foot").textContent = `${emp.length} × ${rotuloGrupo().toLowerCase()} · ${emp.reduce((s,e)=>s+e.qtd,0)} pagamento(s)`;
+
+  ultimaTabela.frequencia = [[rotuloGrupo(),"Recorrencia","Qtd pagamentos","Volume total","Bancos"]]
+    .concat(emp.map(e => [e.empresa, e.qtd > 1 ? "Múltiplo" : "Único", e.qtd, e.total, [...e.bancos].join(" / ")]));
+}
+
+/* ----- Página 3: status ----- */
+function renderStatus(){
+  const f = S.filtros, lim = +f.limite || 0, porPagamento = S.statusVisao === "pagamento";
+  const recs = filtra();
+  $("#status-periodo").textContent = rotuloPeriodo();
+  $$("#status-pills .pill").forEach(b => b.setAttribute("aria-pressed", b.dataset.st === f.st));
+  $$("#status-visao .pill").forEach(b => b.setAttribute("aria-pressed", b.dataset.visao === S.statusVisao));
+  $("#f-conf").value = f.conf;
+  $("#status-titulo").textContent = porPagamento ? "Pagamentos da semana" : "Situação por empresa";
+
+  const todas = porEmpresa(recs);
+  const total = recs.reduce((s,r) => s + r.valor, 0);
+  const emAlerta = todas.filter(e => e.total > lim);
+  const alertaGeral = total > lim;
+  $("#status-kpis").innerHTML = recs.length ? [
+    kpi("Pagamentos da semana", recs.length.toLocaleString("pt-BR"), rotuloPeriodo(), false, true),
+    kpi("Total da semana", brl(total), `${todas.length} × ${rotuloGrupo().toLowerCase()}`),
+    kpi("Status do período", alertaGeral ? "Alerta" : "Normal", `Limite de ${brl(lim)}`, alertaGeral),
+    kpi("Acima do limite", emAlerta.length.toLocaleString("pt-BR"),
+        emAlerta.length ? brlCurto(emAlerta.reduce((s,e)=>s+e.total,0)) + " concentrados" : "nenhum caso",
+        emAlerta.length > 0),
+    (() => {
+      if (porPagamento){
+        const acima = recs.filter(r => r.valor > lim);
+        const pend = acima.filter(r => !estadoRevisao(r)).length;
+        const ver = acima.filter(r => estadoRevisao(r) === "ver").length;
+        const nota = acima.length
+          ? `de ${acima.length} pagamento(s) acima do limite${ver ? " · " + ver + " a verificar" : ""}`
+          : "nenhum pagamento acima do limite";
+        return kpi("Conferência pendente", pend.toLocaleString("pt-BR"), nota, pend > 0 || ver > 0);
+      }
+      const pend = emAlerta.filter(e => !estadoEmpresa(e).estado).length;
+      const ver = emAlerta.filter(e => estadoEmpresa(e).estado === "ver").length;
+      const nota = emAlerta.length
+        ? `de ${emAlerta.length} em alerta${ver ? " · " + ver + " a verificar" : ""}`
+        : "nada em alerta no período";
+      return kpi("Conferência pendente", pend.toLocaleString("pt-BR"), nota, pend > 0 || ver > 0);
+    })()
+  ].join("") : "";
+
+  const semDados = !S.recs.length;
+  const limpa = msg => { $("#status-tabela").innerHTML = msg; $("#status-foot").textContent = ""; $("#status-pag").hidden = true; };
+  if (semDados) return limpa(vazio(S.erroCarga ? "Não foi possível ler os dados do Drive. Use Atualizar para tentar de novo." : "Carregando os dados do Drive…", "Sem planilha carregada"));
+
+  /* ---- visão por pagamento: uma linha por lançamento ---- */
+  if (porPagamento){
+    let lista = recs.map(r => ({ r, alerta:r.valor > lim, rev:revisaoDe(r) }));
+    if (f.st === "acima") lista = lista.filter(x => x.alerta);
+    if (f.st === "abaixo") lista = lista.filter(x => !x.alerta);
+    if (f.conf === "pendentes") lista = lista.filter(x => x.alerta && !x.rev);
+    if (f.conf === "autorizados") lista = lista.filter(x => x.rev && x.rev.e === "ok");
+    if (f.conf === "verificar") lista = lista.filter(x => x.rev && x.rev.e === "ver");
+    lista.sort((a,b) => b.r.data - a.r.data || b.r.valor - a.r.valor);
+    if (!lista.length){
+      const maior = recs.reduce((m,r) => r.valor > (m ? m.valor : -1) ? r : m, null);
+      const partes = [];
+      if (f.st === "acima" && maior)
+        partes.push(`Nenhum pagamento <b>individual</b> passou de ${brl(lim)} neste recorte.
+          O maior foi ${brl(maior.valor)}, de ${esc(chaveGrupo(maior))} em ${dataBR(maior.data)}.
+          Na visão <b>Por empresa</b> o alerta compara o <b>total da semana</b>, por isso lá podem
+          aparecer empresas em alerta mesmo sem nenhum pagamento isolado acima do limite.`);
+      else if (f.conf !== "todas")
+        partes.push(`Nenhum pagamento com a conferência em <b>${
+          { pendentes:"pendente", autorizados:"autorizado", verificar:"a verificar" }[f.conf]
+        }</b> neste recorte. Troque o filtro <b>Conferência</b> para <b>Todas</b>.`);
+      else
+        partes.push("Nenhum pagamento nessa faixa de valor. Ajuste o limite ou troque o filtro.");
+      if (f.busca) partes.push(`O filtro de nome está ativo em <b>${esc(f.busca)}</b>.`);
+      if (!recs.length) partes.push("Não há pagamento algum no período selecionado.");
+      return limpa(vazio(partes.join(" "), "Nada neste recorte"));
+    }
+
+    const PORPAG = 50, paginas = Math.ceil(lista.length / PORPAG);
+    if (S.pag > paginas) S.pag = 1;
+    const de = (S.pag - 1) * PORPAG, ate = Math.min(de + PORPAG, lista.length);
+    const hj = hoje();
+
+    const linhas = lista.slice(de, ate).map(({r, alerta, rev}) => `<tr class="${alerta ? "an-alerta" : ""} ${rev ? "an-conf-" + rev.e : ""}">
+      <td>${chipStatus(alerta)}</td>
+      <td class="${r.data.getTime() === hj ? "an-hoje" : ""}">${r.data.getTime() === hj ? "Hoje" : dataBR(r.data)}
+        <span class="an-sub">${DIAS[r.dia] || "Fim de semana"}</span></td>
+      <td class="an-co">${esc(chaveGrupo(r))}${contraparte(r) ? `<span class="an-sub">${esc(contraparte(r))}</span>` : ""}</td>
+      <td>${esc(r.natureza)}<span class="an-sub">${esc(r.depto)}</span></td>
+      <td>${esc(r.banco)}</td>
+      <td class="num ${alerta ? "an-bold" : ""}">${fmtN.format(r.valor)}</td>
+      <td>${alerta ? celulaConferencia(r, rev) : '<span class="an-sub" style="margin:0">Dentro do limite</span>'}</td>
+      <td class="c"><button type="button" class="an-acao" data-emp="${esc(chaveGrupo(r))}">Ver empresa</button></td></tr>`).join("");
+
+    $("#status-tabela").innerHTML = avisos() + `<table class="portal-table an-t">
+      <thead><tr><th>Status</th><th>Data</th><th>${esc(rotuloGrupo())}</th>
+        <th>Natureza / departamento</th><th>Banco</th><th class="num">Valor (R$)</th>
+        <th>Conferência</th><th class="c">Ação</th></tr></thead>
+      <tbody>${linhas}</tbody>
+      <tfoot><tr><td colspan="5">Total do recorte</td>
+        <td class="num">${fmtN.format(lista.reduce((s,x)=>s+x.r.valor,0))}</td><td colspan="2"></td></tr></tfoot>
+    </table>`;
+    $("#status-foot").textContent = `Mostrando ${de+1} a ${ate} de ${lista.length.toLocaleString("pt-BR")} pagamentos · limite em ${brl(lim)}`
+      + (f.busca ? ` · filtrado por “${f.busca}”` : "");
+    $("#status-pag").hidden = paginas < 2;
+    $("#pag-ant").disabled = S.pag <= 1;
+    $("#pag-prox").disabled = S.pag >= paginas;
+
+    ultimaTabela.status = [["Status","Data","Dia",rotuloGrupo(),"Natureza","Departamento","Banco","Valor",
+        "Conferencia"]]
+      .concat(lista.map(({r,alerta,rev}) => [alerta ? "Alerta" : "Normal",
+        r.data.toLocaleDateString("pt-BR"), DIAS[r.dia] || "Fim de semana",
+        chaveGrupo(r), r.natureza, r.depto, r.banco, r.valor,
+        !alerta ? "Dentro do limite" : rev ? (rev.e === "ok" ? "Autorizado" : "Verificar com o departamento") : "Pendente"]));
+    return;
+  }
+
+  /* ---- visão por empresa: agregado da semana ---- */
+  let emp = porEmpresa(recs);
+  if (f.st === "acima") emp = emp.filter(e => e.total > lim);
+  if (f.st === "abaixo") emp = emp.filter(e => e.total <= lim);
+  if (f.conf !== "todas"){
+    const alvo = { pendentes:"", autorizados:"ok", verificar:"ver" }[f.conf];
+    emp = emp.filter(e => {
+      if (e.total <= lim) return false;                       // só quem está em alerta
+      return estadoEmpresa(e).estado === alvo;
+    });
+  }
+  if (!emp.length){
+    const partes = [];
+    if (f.conf !== "todas")
+      partes.push(`Nenhuma empresa em alerta com a conferência em <b>${
+        { pendentes:"pendente", autorizados:"autorizada", verificar:"a verificar" }[f.conf]
+      }</b> neste recorte.`);
+    else partes.push("Nenhuma empresa nessa faixa de valor. Ajuste o limite ou troque o filtro.");
+    if (f.busca) partes.push(`O filtro de nome está ativo em <b>${esc(f.busca)}</b>.`);
+    return limpa(vazio(partes.join(" "), "Nada neste recorte"));
+  }
+
+  const linhas = emp.map(e => {
+    const alerta = e.total > lim;
+    const estE = alerta ? estadoEmpresa(e).estado : "";
+    return `<tr class="${alerta ? "an-alerta" : ""} ${estE ? "an-conf-" + estE : ""}">
+      <td>${chipStatus(alerta)}</td>
+      <td class="an-co">${esc(e.empresa)}<span class="an-sub">${esc([...e.bancos].join(", "))}</span></td>
+      <td class="num" style="text-align:left">${e.qtd}</td>
+      <td class="num ${alerta ? "an-bold" : ""}">${fmtN.format(e.total)}</td>
+      <td class="num">${fmtN.format(e.total / e.qtd)}</td>
+      <td>${esc([...e.deps].join(", "))}<span class="an-sub">${esc([...e.nats].slice(0,2).join(" · "))}</span></td>
+      <td>${celulaConferenciaEmpresa(e, lim, alerta)}</td>
+      <td class="c"><button type="button" class="an-acao" data-emp="${esc(e.empresa)}">Ver pagamentos</button></td></tr>`;
+  }).join("");
+
+  $("#status-tabela").innerHTML = avisos() + `<table class="portal-table an-t">
+    <thead><tr><th>Status</th><th>${esc(rotuloGrupo())}</th><th>Qtd.</th>
+      <th class="num">Total da semana (R$)</th><th class="num">Valor médio</th>
+      <th>Departamento / natureza</th><th>Conferência</th><th class="c">Ação</th></tr></thead>
+    <tbody>${linhas}</tbody>
+    <tfoot><tr><td colspan="2">Total geral</td><td class="num" style="text-align:left">${emp.reduce((s,e)=>s+e.qtd,0)}</td>
+      <td class="num">${fmtN.format(emp.reduce((s,e)=>s+e.total,0))}</td><td colspan="4"></td></tr></tfoot>
+  </table>`;
+  const pendEmp = emAlerta.filter(e => !estadoEmpresa(e).estado).length;
+  $("#status-foot").textContent = `${emp.length} × ${rotuloGrupo().toLowerCase()} · limite de alerta em ${brl(lim)}`
+    + (emAlerta.length ? ` · ${emAlerta.length - pendEmp} de ${emAlerta.length} em alerta conferida(s)` : "")
+    + (f.busca ? ` · filtrado por “${f.busca}”` : "");
+  $("#status-pag").hidden = true;
+
+  const rotuloConf = RDES;
+  ultimaTabela.status = [["Status",rotuloGrupo(),"Qtd pagamentos","Total semana","Valor medio",
+      "Departamentos","Naturezas","Conferencia",
+      "Pagamentos acima do limite","Autorizados","A verificar"]]
+    .concat(emp.map(e => {
+      const alerta = e.total > lim;
+      const est = alerta ? estadoEmpresa(e) : null;
+      const acima = e.recs.filter(r => r.valor > lim);
+      return [alerta ? "Alerta" : "Normal", e.empresa, e.qtd, e.total, e.total/e.qtd,
+        [...e.deps].join(" / "), [...e.nats].join(" / "),
+        alerta ? (est.parcial ? `Parcial (${est.ok} de ${est.total} semanas)` : rotuloConf[est.estado]) : "",
+        acima.length, acima.filter(r => estadoRevisao(r) === "ok").length,
+        acima.filter(r => estadoRevisao(r) === "ver").length];
+    }));
+}
+
+/* ----- Página 4: fonte de dados ----- */
+function renderFonte(){
+  const cb = (icone, corpo) => `<div class="ic">${svg(icone)}</div><div class="an-cb">${corpo}</div>`;
+  $("#auto-hint-text").innerHTML = `<b>Atualização automática.</b> Os dados vêm do Drive, onde a Controladoria publica as planilhas. Enquanto a aba estiver aberta, o painel confere a cada 5 minutos se há dados novos e recarrega sozinho. O botão <b>Atualizar</b> força a leitura na hora.`;
+
+  atualizaEstadoRev();
+  const nRev = totalRevisoes();
+  $("#btn-limpar-rev").hidden = !nRev;
+  $("#btn-limpar-rev").innerHTML = svg("i-close") + `Limpar conferências (${nRev})`;
+  $("#btn-salvar-rev").disabled = !nRev;
+  const cacheEl = $("#cache-info");
+  const quandoGerou = S.geradoEm
+    ? S.geradoEm.toLocaleDateString("pt-BR") + " às " + S.geradoEm.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) : "";
+  if (S.erroCarga){
+    cacheEl.className = "portal-callout";
+    cacheEl.innerHTML = cb("i-alert", `<b>Falha ao ler os dados do Drive.</b> ${esc(S.erroCarga)}.
+      Clique em <b>Atualizar</b> para tentar de novo.`);
+  } else if (S.origemTipo === "drive"){
+    cacheEl.className = "portal-callout info";
+    cacheEl.innerHTML = cb("i-check", `<b>Dados do Drive.</b>
+      ${S.recs.length.toLocaleString("pt-BR")} pagamentos de ${S.arquivos.length} planilha(s)${quandoGerou ? ", exportados pelo sincronizador em " + quandoGerou : ""}.
+      ${LS.ok ? "" : "<br><b>Este navegador bloqueou o armazenamento local:</b> preferências de filtro e conferências não serão lembradas entre aberturas."}`);
+  } else {
+    cacheEl.className = "portal-callout info";
+    cacheEl.innerHTML = cb("i-info", `Carregando os dados do Drive…`);
+  }
+
+  const lista = $("#filelist");
+  if (!S.arquivos.length){
+    lista.innerHTML = `<li><span class="meta">Nenhum arquivo carregado ainda.</span></li>`;
+  } else {
+    lista.innerHTML = S.arquivos.map(a => {
+      const regs = a.abas.reduce((s,ab) => s + (ab.registros || 0), 0);
+      const problemas = a.abas.filter(ab => !ab.ok || !ab.registros);
+      return `<li>${svg("i-file")}
+        <span class="nm">${esc(a.caminho)}<span class="an-sub">${a.abas.length} aba(s)${a.anoNome ? " · ano " + a.anoNome : ""}${problemas.length ? " · " + problemas.length + " aba(s) sem dados" : ""}</span></span>
+        <span class="meta">${regs.toLocaleString("pt-BR")} pagamentos</span>
+        <span class="meta">${a.mtime ? a.mtime.toLocaleString("pt-BR") : ""}</span></li>`;
+    }).join("");
+  }
+  $("#schema-tabela").innerHTML = `<table class="portal-table an-t"><thead><tr><th>Coluna esperada</th><th>Obrigatória</th><th>Nomes reconhecidos automaticamente</th></tr></thead><tbody>
+    ${CAMPO_IDS.map(id => `<tr><td class="an-co">${CAMPOS[id].rotulo}</td>
+      <td>${CAMPOS[id].obrig ? '<span class="portal-chip bad">Sim</span>' : '<span class="portal-chip info">Opcional</span>'}</td>
+      <td>${CAMPOS[id].chaves.slice(0,6).join(", ")}…</td></tr>`).join("")}
+  </tbody></table>`;
+}
+
+/* ---------------- Modal de mapeamento ---------------- */
+function abreMapa(){
+  const body = $("#map-body");
+  if (!S.cruas.size){
+    body.innerHTML = `<p>Os dados ainda não foram carregados do Drive. Aguarde ou clique em <b>Atualizar</b>.</p>`;
+  }
+  else {
+    body.innerHTML = [...S.cruas.values()].map((cru,idx) => {
+      const mapa = Object.assign({}, mapeia(cru.headers), S.overrides[cru.assinatura] || {});
+      return `<div class="an-maprow" data-sig="${esc(cru.assinatura)}">
+        <h4>${esc(cru.arquivo)} › ${esc(cru.aba)}</h4>
+        <p>Cabeçalho na linha ${cru.hr + 1} · ${cru.headers.length} colunas</p>
+        <div class="an-mapgrid">${CAMPO_IDS.map(id => `<div>
+          <label for="m${idx}-${id}">${CAMPOS[id].rotulo}${CAMPOS[id].obrig ? " *" : ""}</label>
+          <select class="portal-sel" id="m${idx}-${id}" data-campo="${id}">
+            <option value="">— não usar —</option>
+            ${cru.headers.map((h,i) => `<option value="${i}" ${mapa[id] === i ? "selected" : ""}>${esc(h)}</option>`).join("")}
+          </select></div>`).join("")}</div></div>`;
+    }).join("");
+  }
+  $("#map-overlay").classList.add("open");
+}
+function salvaMapa(){
+  $$("#map-body .an-maprow").forEach(row => {
+    const sig = row.dataset.sig, over = {};
+    row.querySelectorAll("select").forEach(sel => { if (sel.value !== "") over[sel.dataset.campo] = +sel.value; });
+    S.overrides[sig] = over;
+  });
+  salvaOverrides();
+  const geradoEm = S.geradoEm;
+  reconstroi(); S.ultimaLeitura = geradoEm || S.ultimaLeitura; tudo();
+  $("#map-overlay").classList.remove("open");
+  toast(`Colunas aplicadas · ${S.recs.length} pagamentos.`);
+}
+
+/* ---------------- Exportação CSV ---------------- */
+function exporta(qual, ev){
+  ultimaTabela[qual] = [];
+  ({ valores:renderValores, frequencia:renderFrequencia, status:renderStatus })[qual]();   // garante os dados do recorte atual
+  const dados = ultimaTabela[qual];
+  if (!dados || dados.length < 2){ toast("Nada para exportar."); return; }
+  const cel = v => typeof v === "number" ? String(v).replace(".",",") : `"${String(v ?? "").replace(/"/g,'""')}"`;
+  const csv = "﻿" + dados.map(l => l.map(cel).join(";")).join("\r\n");
+  baixaArquivo(`pagamentos-${qual}-${new Date().toISOString().slice(0,10)}.csv`, csv, "text/csv",
+    "Exportação gerada.", !!(ev && ev.shiftKey));
+}
+
+/* ---------------- Eventos ---------------- */
+const fechaMenus = () => $$(".an-menu").forEach(m => m.classList.remove("open"));
+function liga(){
+  $("#f-ano").addEventListener("change", e => { S.filtros.ano = e.target.value; renderFiltros(); render(); salvaFiltros(); });
+  $("#f-mes").addEventListener("change", e => { S.filtros.mes = e.target.value; renderFiltros(); render(); salvaFiltros(); });
+  $("#f-semana").addEventListener("change", e => { S.filtros.semana = e.target.value; render(); salvaFiltros(); });
+  $("#f-busca").addEventListener("input", e => { S.filtros.busca = e.target.value; render(); });
+  $("#f-grupo").addEventListener("change", e => {
+    S.filtros.grupo = e.target.value; S.abertos.clear();
+    $("#f-busca").placeholder = "Filtrar " + rotuloGrupo().toLowerCase();
+    $("#btn-limpar").hidden = !filtrosAtivos(); render(); salvaFiltros();
+  });
+  $("#f-limite").addEventListener("input", e => {
+    const v = parseFloat(e.target.value);
+    S.filtros.limite = isFinite(v) && v >= 0 ? v : 0;      // campo vazio = sem limite
+    render(); salvaFiltros();
+  });
+  $("#f-limite").addEventListener("blur", e => {
+    if (e.target.value === ""){ e.target.value = S.filtros.limite = 10000; render(); salvaFiltros(); }
+  });
+
+  const dd = (btn, menu, conjunto, contador, itensFn) => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const abrir = !menu.classList.contains("open");
+      fechaMenus();
+      menu.style.left = "0";
+      menu.classList.toggle("open", abrir); btn.setAttribute("aria-expanded", abrir);
+      if (abrir){      // mantém o menu dentro da tela (telas estreitas)
+        const r = menu.getBoundingClientRect();
+        if (r.right > window.innerWidth - 8) menu.style.left = (window.innerWidth - 8 - r.right) + "px";
+      }
+    });
+    menu.addEventListener("click", e => {
+      e.stopPropagation();
+      const b = e.target.closest("button");
+      if (b && b.dataset.all){ itensFn().forEach(i => conjunto.add(i)); }
+      else if (b && b.dataset.none){ conjunto.clear(); }
+      else if (e.target.matches("input[type=checkbox]")){
+        e.target.checked ? conjunto.add(e.target.value) : conjunto.delete(e.target.value);
+      } else return;
+      if (conjunto.size === itensFn().length) conjunto.clear();  // todos = sem filtro
+      menuMulti(menu, contador, itensFn(), conjunto);
+      render(); salvaFiltros();
+    });
+  };
+  dd($("#dep-btn"), $("#dep-menu"), S.filtros.deps, $("#dep-count"), () => opcoes().deps);
+  dd($("#banco-btn"), $("#banco-menu"), S.filtros.bancos, $("#banco-count"), () => opcoes().bancos);
+  dd($("#nat-btn"), $("#nat-menu"), S.filtros.naturezas, $("#nat-count"), () => opcoes().naturezas);
+  document.addEventListener("click", fechaMenus);
+
+  $("#freq-pills").addEventListener("click", e => {
+    const b = e.target.closest(".pill"); if (!b) return;
+    S.filtros.freq = b.dataset.freq; render(); salvaFiltros();
+  });
+  $("#status-pills").addEventListener("click", e => {
+    const b = e.target.closest(".pill"); if (!b) return;
+    S.filtros.st = b.dataset.st; S.pag = 1; render(); salvaFiltros();
+  });
+  $("#f-conf").addEventListener("change", e => {
+    S.filtros.conf = e.target.value; S.pag = 1;
+    render(); salvaFiltros();
+  });
+  $("#status-tabela").addEventListener("change", e => {
+    const emp = e.target.closest("select[data-rev-emp]");
+    if (emp){
+      const alvo = porEmpresa(filtra()).find(x => x.empresa === emp.dataset.revEmp);
+      if (alvo){
+        defineRevisaoEmpresa(alvo, emp.value);
+        const n = semanasDaEmpresa(alvo).length;
+        if (n > 1) toast(`Conferência aplicada às ${n} semanas de ${alvo.empresa} neste recorte.`);
+      }
+      renderStatus();
+      return;
+    }
+    const el = e.target.closest("select[data-rev]"); if (!el) return;
+    defineRevisao(el.dataset.rev, el.value);
+    renderStatus();
+  });
+  $("#status-visao").addEventListener("click", e => {
+    const b = e.target.closest(".pill"); if (!b) return;
+    S.statusVisao = b.dataset.visao; S.pag = 1; render(); salvaFiltros();
+  });
+  $("#pag-ant").addEventListener("click", () => { S.pag = Math.max(1, S.pag - 1); renderStatus(); });
+  $("#pag-prox").addEventListener("click", () => { S.pag++; renderStatus(); });
+  $("#status-tabela").addEventListener("click", e => {
+    const b = e.target.closest(".an-acao"); if (!b) return;
+    S.filtros.busca = b.dataset.emp; S.filtros.freq = "todos";
+    S.abertos.clear(); S.abertos.add(b.dataset.emp);
+    $("#f-busca").value = b.dataset.emp;
+    irPara("frequencia");
+    toast("Filtrando por " + b.dataset.emp + ". Use “Limpar filtros” para ver todos.");
+  });
+  $("#freq-tabela").addEventListener("click", e => {
+    const tr = e.target.closest("tr.an-group"); if (!tr) return;
+    const emp = tr.dataset.emp;
+    S.abertos.has(emp) ? S.abertos.delete(emp) : S.abertos.add(emp);
+    renderFrequencia();
+  });
+  $("#freq-tabela").addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const tr = e.target.closest("tr.an-group"); if (!tr) return;
+    e.preventDefault(); tr.click();
+  });
+
+  $("#btn-limpar").addEventListener("click", limpaFiltros);
+  $("#btn-refresh").addEventListener("click", atualizar);
+  $("#carga-retry").addEventListener("click", atualizar);
+  $("#dl-fechar").addEventListener("click", () => $("#dl-overlay").classList.remove("open"));
+  $("#dl-overlay").addEventListener("click", e => { if (e.target.id === "dl-overlay") $("#dl-overlay").classList.remove("open"); });
+
+  $("#btn-map").addEventListener("click", abreMapa);
+  $("#btn-salvar-rev").addEventListener("click", exportaRevisoes);
+  $("#in-rev").addEventListener("change", e => { if (e.target.files[0]) importaRevisoes(e.target.files[0]); e.target.value = ""; });
+  window.addEventListener("pagehide", flushRevisoes);
+  window.addEventListener("beforeunload", flushRevisoes);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) flushRevisoes(); });
+  /* Sem confirm(): o sandbox do Apps Script pode bloquear diálogos. Confirmação em dois cliques. */
+  let limparArmado = null;
+  $("#btn-limpar-rev").addEventListener("click", () => {
+    const b = $("#btn-limpar-rev");
+    if (!limparArmado){
+      b.textContent = `Clique de novo: apaga as ${totalRevisoes()} conferências de TODOS os usuários`;
+      limparArmado = setTimeout(() => { limparArmado = null; renderFonte(); }, 4000);
+      return;
+    }
+    clearTimeout(limparArmado); limparArmado = null;
+    limpaRevisoes(); renderFonte();
+  });
+  $("#map-save").addEventListener("click", salvaMapa);
+  [$("#map-close"), $("#map-cancel")].forEach(b => b.addEventListener("click", () => $("#map-overlay").classList.remove("open")));
+  $("#map-overlay").addEventListener("click", e => { if (e.target.id === "map-overlay") $("#map-overlay").classList.remove("open"); });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape"){ $("#map-overlay").classList.remove("open"); $("#dl-overlay").classList.remove("open"); fechaMenus(); }
+  });
+  let ultimaChecagem = Date.now();
+  const checa = () => { ultimaChecagem = Date.now(); verificaMudancas(); confSincroniza(); };
+  window.addEventListener("focus", () => { if (Date.now() - ultimaChecagem > 60000) checa(); });
+  setInterval(checa, 180000);
+}
+
+/* ---------------- Início ---------------- */
+(function init(){
+  carregaPrefs();
+  PORTAL_SHELL.init({
+    chave:"analise", titulo:"Análise Semanal",
+    dashboards:<?!= JSON.stringify(DASHBOARDS) ?>,
+    inicial:S.view, onNavegar:aoNavegar,
+    paginas:[
+      { id:"valores",    rotulo:"Valores por dia", icone:"calendar_view_week" },
+      { id:"frequencia", rotulo:"Frequência",      icone:"bar_chart" },
+      { id:"status",     rotulo:"Status",          icone:"verified_user" },
+      { id:"fonte",      rotulo:"Fonte de dados",  icone:"cloud_sync" }
+    ],
+    exportar:[
+      { rotulo:"Exportar CSV · Valores por dia", icone:"table_chart", fn:() => exporta("valores") },
+      { rotulo:"Exportar CSV · Frequência",      icone:"table_chart", fn:() => exporta("frequencia") },
+      { rotulo:"Exportar CSV · Status",          icone:"table_chart", fn:() => exporta("status") },
+      { rotulo:"Imprimir",                       icone:"print",       fn:() => window.print() }
+    ],
+    atualizar:() => atualizar()
+  });
+  montaFiltros();
+  liga();
+  $("#f-limite").value = S.filtros.limite;
+  $("#f-busca").value = "";
+  S.usuario = LS.get(LS_USER) || "";
+  pronto = true;
+  tudo();
+  carregaRevisoes();
+  atualizaEstadoRev();
+  confSincroniza();
+  carregaDoDrive(false).then(() => { atualizaEstadoRev(); render(); });
+})();
+
+</script>
+</body>
+</html>

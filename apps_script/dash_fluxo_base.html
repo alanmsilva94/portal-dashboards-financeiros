@@ -1,0 +1,859 @@
+<!-- Fluxo de Caixa: leitura/consolidacao das planilhas (adaptado de base-local.js). Incluido por dash_fluxo.html -->
+<script>
+/* =============================================================================
+   BASE FLUXO DE CAIXA (Apps Script) — adaptado de base-local.js
+   =============================================================================
+   Mesma logica de leitura/consolidacao do painel offline (NUCLEO), mas a fonte
+   das planilhas e o Drive (PORTAL.carregar('fluxo')) em vez do seletor de pasta.
+   As planilhas chegam reduzidas por sincronizador/reducers/fluxo.py: uma linha
+   por (dia, departamento) com as colunas auxiliares Qtd / ValorInvalido /
+   DataInvalida, que aqui sao somadas de volta (os numeros nao mudam).
+   Tambem aceita as planilhas cruas (sem essas colunas).
+============================================================================= */
+(function (global) {
+  'use strict';
+
+  // ===========================================================================
+  // 1. NUCLEO
+  // ===========================================================================
+
+  var ANO_BASE = 2018;
+
+  var MESES_PT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+                  'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+  var LABELS_SETOR = {
+    'RH': 'RH',
+    'DESPESA MINISTERIAL': 'Despesa Ministerial',
+    'AUDIO VISUAL': 'Audiovisual',
+    'AUDIOVISUAL': 'Audiovisual',
+    'SEDE MUNDIAL': 'Sede Mundial',
+    'TI/REDES': 'TI/Redes',
+    'APOIO BRASIL': 'Apoio Brasil',
+    'PASSAGENS': 'Passagens',
+    'JURIDICO': 'Jurídico',
+    'FISCALIZACAO': 'Fiscalização',
+    'MARKETING': 'Marketing',
+    'APOIO EXTERIOR': 'Apoio Exterior',
+    'OBRAS': 'Obras',
+    'IMOVEIS': 'Imóveis',
+    'COMUNICACAO': 'Comunicação'
+  };
+
+  var SETORES_DEDICADOS = ['Obras', 'Imóveis', 'Comunicação'];
+  var SETORES_HISTORICO = SETORES_DEDICADOS.concat(['Audiovisual']);
+
+  /* Cada coluna aceita nomes alternativos; o primeiro e o nome "oficial". */
+  var COLS_ENTRADAS = ['Data', ['Entradas do dia', 'Entradas', 'Entrada', 'Valor', 'Valor (R$)', 'Total']];
+  var COLS_SAIDAS = ['Data', ['Departamento', 'Setor', 'Depto'], ['Valor', 'Valor (R$)', 'Total']];
+
+  /* Aceita "2026.xlsx", "Saidas 2026.xlsx" e "Saídas_2026.xlsx". */
+  var RE_ANO = /^(?:sa[íi]das[ _-]*)?(\d{4})\.xlsx$/i;
+  var RE_ENTRADAS = /^entradas[ _-]*\d*\.xlsx$/i;
+
+  function normalizar(txt) {
+    return String(txt == null ? '' : txt)
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ').trim().toUpperCase();
+  }
+
+  function labelDe(dep) {
+    var chave = normalizar(dep);
+    if (LABELS_SETOR[chave]) return LABELS_SETOR[chave];
+    var texto = String(dep).trim().toLowerCase();
+    return texto.replace(/(^|[\s\/])([a-zà-ÿ])/g, function (m, a, b) {
+      return a + b.toUpperCase();
+    });
+  }
+
+  function idx(ano, mes0) { return (ano - ANO_BASE) * 12 + mes0; }
+
+  function rotuloMes(ano, mes0) {
+    return MESES_PT[mes0] + '/' + String(ano).slice(2);
+  }
+
+  function arred(v) { return Math.round(v * 100) / 100; }
+
+  /* Converte a celula de data em [ano, mes0]. Aceita Date, numero serial do
+     Excel e texto no formato brasileiro. */
+  function comoData(valor) {
+    if (valor == null) return null;
+    if (valor instanceof Date && !isNaN(valor)) {
+      return [valor.getFullYear(), valor.getMonth(), valor.getDate()];
+    }
+    if (typeof valor === 'number' && isFinite(valor) && valor > 0) {
+      var d = new Date(Date.UTC(1899, 11, 30) + Math.floor(valor) * 86400000);
+      return [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()];
+    }
+    if (typeof valor === 'string') {
+      var m = valor.trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+      if (m) {
+        var ano = parseInt(m[3], 10);
+        if (ano < 100) ano += 2000;
+        return [ano, parseInt(m[2], 10) - 1, parseInt(m[1], 10)];
+      }
+      m = valor.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (m) return [parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)];
+    }
+    return null;
+  }
+
+  function comoNumero(valor) {
+    if (valor == null || valor === '') return null;
+    if (typeof valor === 'number') return isFinite(valor) ? valor : null;
+    var t = String(valor).replace('R$', '').replace(/\s/g, '');
+    if (!t) return null;
+    if (t.indexOf(',') >= 0) t = t.replace(/\./g, '').replace(',', '.');
+    var n = parseFloat(t);
+    return isNaN(n) ? null : n;
+  }
+
+  /* Localiza as colunas obrigatorias comparando os titulos sem acento. */
+  function mapearColunas(cabecalho, obrigatorias, nomeArquivo) {
+    var indices = {}, faltando = [];
+    obrigatorias.forEach(function (col) {
+      var nomes = [].concat(col), pos = -1;
+      for (var k = 0; k < nomes.length && pos < 0; k++) {
+        var alvo = normalizar(nomes[k]);
+        for (var i = 0; i < cabecalho.length; i++) {
+          if (normalizar(cabecalho[i]) === alvo) { pos = i; break; }
+        }
+      }
+      if (pos < 0) faltando.push(nomes.length > 1 ? nomes[0] + ' (ou ' + nomes.slice(1).join(', ') + ')' : nomes[0]);
+      else indices[nomes[0]] = pos;
+    });
+    if (faltando.length) {
+      throw new Error('A planilha "' + nomeArquivo + '" não tem a(s) coluna(s): '
+        + faltando.join(', ') + '. Colunas encontradas: '
+        + cabecalho.filter(Boolean).join(', ') + '.');
+    }
+    return indices;
+  }
+
+  /* Linhas da primeira aba de um workbook SheetJS (vindo de PORTAL.carregar). */
+  function linhasDaPlanilha(wb, nomeArquivo) {
+    var ws = wb && wb.Sheets && wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('A planilha "' + nomeArquivo + '" está vazia.');
+    var linhas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: false });
+    if (!linhas.length) throw new Error('A planilha "' + nomeArquivo + '" está vazia.');
+    return linhas;
+  }
+
+  /* Colunas auxiliares escritas pelo reducer (-1 se a planilha e crua). */
+  function colExtra(cab, nome) {
+    var alvo = normalizar(nome);
+    for (var i = 0; i < cab.length; i++) if (normalizar(cab[i]) === alvo) return i;
+    return -1;
+  }
+  function inteiro(v) { var n = comoNumero(v); return n == null ? 0 : Math.round(n); }
+
+  /* ENTRADAS: soma a coluna "Entradas do dia" por mes.
+     "Receita de Vendas imoveis" e um detalhe do que ja esta em "Entradas do
+     dia" -- e informativa e nao pode ser somada ao total. */
+  function lerEntradas(wb, nomeArquivo) {
+    var linhas = linhasDaPlanilha(wb, nomeArquivo);
+    var cab = linhas[0].map(function (c) { return c == null ? '' : String(c).trim(); });
+    var ind = mapearColunas(cab, COLS_ENTRADAS, nomeArquivo);
+    var iData = ind['Data'], iVal = ind['Entradas do dia'];
+    var iQtd = colExtra(cab, 'Qtd'), iVI = colExtra(cab, 'ValorInvalido'), iDI = colExtra(cab, 'DataInvalida');
+
+    var mensal = {}, n = 0, ruinsData = 0, ruinsValor = 0, ultimo = null, ultimoData = null;
+    for (var i = 1; i < linhas.length; i++) {
+      var linha = linhas[i];
+      if (!linha) continue;
+      var am = comoData(linha[iData]);
+      if (!am) {
+        if (iDI >= 0) ruinsData += inteiro(linha[iDI]);
+        else if (linha.some(function (c) { return c != null && c !== ''; })) ruinsData++;
+        continue;
+      }
+      var q = iQtd >= 0 ? (inteiro(linha[iQtd]) || 1) : 1;
+      var v = comoNumero(linha[iVal]);
+      if (v === null) { ruinsValor++; v = 0; }
+      if (iVI >= 0) ruinsValor += inteiro(linha[iVI]);
+      n += q;
+      var k = am[0] + '-' + am[1];
+      mensal[k] = (mensal[k] || 0) + v;
+      if (!ultimo || am[0] > ultimo[0] || (am[0] === ultimo[0] && am[1] > ultimo[1])) ultimo = [am[0], am[1]];
+      ultimoData = maisRecente(ultimoData, am);
+    }
+    if (!n) throw new Error('Nenhum lançamento válido em "' + nomeArquivo + '".');
+    Object.keys(mensal).forEach(function (k) { mensal[k] = arred(mensal[k]); });
+    return { mensal: mensal, linhas: n, ruinsData: ruinsData, ruinsValor: ruinsValor, ultimo: ultimo, ultimoData: ultimoData };
+  }
+
+  /* SAIDAS: soma "Valor" por mes e por (mes, Departamento). */
+  function lerSaidas(wb, nomeArquivo) {
+    var linhas = linhasDaPlanilha(wb, nomeArquivo);
+    var cab = linhas[0].map(function (c) { return c == null ? '' : String(c).trim(); });
+    var ind = mapearColunas(cab, COLS_SAIDAS, nomeArquivo);
+    var iData = ind['Data'], iDep = ind['Departamento'], iVal = ind['Valor'];
+    var iQtd = colExtra(cab, 'Qtd'), iVI = colExtra(cab, 'ValorInvalido'), iDI = colExtra(cab, 'DataInvalida');
+
+    var mensal = {}, setores = {}, naoMapeados = {};
+    var n = 0, ruinsData = 0, ruinsValor = 0, semDep = 0, ultimo = null, ultimoData = null;
+
+    for (var i = 1; i < linhas.length; i++) {
+      var linha = linhas[i];
+      if (!linha) continue;
+      var am = comoData(linha[iData]);
+      if (!am) {
+        if (iDI >= 0) ruinsData += inteiro(linha[iDI]);
+        else if (linha.some(function (c) { return c != null && c !== ''; })) ruinsData++;
+        continue;
+      }
+      var q = iQtd >= 0 ? (inteiro(linha[iQtd]) || 1) : 1;
+      var v = comoNumero(linha[iVal]);
+      if (v === null) { ruinsValor++; v = 0; }
+      if (iVI >= 0) ruinsValor += inteiro(linha[iVI]);
+      n += q;
+      var k = am[0] + '-' + am[1];
+      mensal[k] = (mensal[k] || 0) + v;
+
+      var dep = linha[iDep], rot;
+      if (dep == null || !String(dep).trim()) { semDep += q; rot = 'Sem departamento'; }
+      else {
+        rot = labelDe(dep);
+        if (!LABELS_SETOR[normalizar(dep)]) {
+          var bruto = String(dep).trim();
+          naoMapeados[bruto] = (naoMapeados[bruto] || 0) + q;
+        }
+      }
+      if (!setores[k]) setores[k] = {};
+      setores[k][rot] = (setores[k][rot] || 0) + v;
+
+      if (!ultimo || am[0] > ultimo[0] || (am[0] === ultimo[0] && am[1] > ultimo[1])) ultimo = [am[0], am[1]];
+      ultimoData = maisRecente(ultimoData, am);
+    }
+    if (!n) throw new Error('Nenhum lançamento válido em "' + nomeArquivo + '".');
+
+    Object.keys(mensal).forEach(function (k) { mensal[k] = arred(mensal[k]); });
+    Object.keys(setores).forEach(function (k) {
+      Object.keys(setores[k]).forEach(function (s) { setores[k][s] = arred(setores[k][s]); });
+    });
+    return {
+      mensal: mensal, setores: setores, naoMapeados: naoMapeados, linhas: n,
+      ruinsData: ruinsData, ruinsValor: ruinsValor, semDep: semDep, ultimo: ultimo, ultimoData: ultimoData
+    };
+  }
+
+  /* O mes em andamento distorce as medias, entao fica de fora dos calculos
+     (e aparece a parte, marcado como parcial). Um mes e considerado FECHADO
+     quando ja terminou no calendario -- nao e preciso esperar o primeiro
+     lancamento do mes seguinte. hoje = [ano, mes0]. */
+  function ultimoFechado(mes, incluirParcial, hoje) {
+    if (!mes) return null;
+    if (incluirParcial) return mes;
+    if (hoje && (mes[0] < hoje[0] || (mes[0] === hoje[0] && mes[1] < hoje[1]))) return mes;
+    return mes[1] === 0 ? [mes[0] - 1, 11] : [mes[0], mes[1] - 1];
+  }
+
+  function menor(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return (a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1])) ? a : b;
+  }
+
+  /* Data mais recente entre [ano, mes0, dia] */
+  function maisRecente(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    for (var i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0) ? a : b; }
+    return a;
+  }
+  function diaMes(d) {
+    return d ? ('0' + d[2]).slice(-2) + '/' + ('0' + (d[1] + 1)).slice(-2) : null;
+  }
+  function maior(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return (a[0] > b[0] || (a[0] === b[0] && a[1] >= b[1])) ? a : b;
+  }
+
+  /* Monta o payload com as mesmas chaves que o dashboard ja consome. */
+  function montarPayload(opcoes) {
+    var entradas = opcoes.entradas || null;
+    var saidasPorAno = opcoes.saidas || {};
+    var semente = opcoes.semente || null;
+    var incluirParcial = !!opcoes.incluirParcial;
+    var usarLedgerParaOIC = opcoes.usarLedgerParaOIC !== false;
+    var dHoje = opcoes.hoje || new Date();
+    var hoje = [dHoje.getFullYear(), dHoje.getMonth()];
+    var avisos = opcoes.avisos || [];
+
+    var saiTotal = {}, saiSetores = {}, ultimoSai = null, ultimoDataSai = null;
+    Object.keys(saidasPorAno).forEach(function (ano) {
+      var d = saidasPorAno[ano];
+      Object.keys(d.mensal).forEach(function (k) { saiTotal[k] = d.mensal[k]; });
+      Object.keys(d.setores).forEach(function (k) {
+        saiSetores[k] = saiSetores[k] || {};
+        Object.keys(d.setores[k]).forEach(function (s) { saiSetores[k][s] = d.setores[k][s]; });
+      });
+      ultimoSai = maior(ultimoSai, d.ultimo);
+      ultimoDataSai = maisRecente(ultimoDataSai, d.ultimoData);
+    });
+
+    var entMensal = entradas ? entradas.mensal : {};
+    var ultimoEnt = entradas ? entradas.ultimo : null;
+
+    /* Historico ja publicado: preenche apenas o que as planilhas nao cobrem. */
+    var semEnt = {}, semSai = {}, semUltimo = null;
+    if (semente && semente.entradas) {
+      var di = semente.dataInicio || { ano: ANO_BASE, mes: 0 };
+      semente.entradas.forEach(function (v, i) {
+        var ano = di.ano + Math.floor((di.mes + i) / 12), mes0 = (di.mes + i) % 12;
+        semEnt[ano + '-' + mes0] = v;
+        semUltimo = maior(semUltimo, [ano, mes0]);
+      });
+      (semente.saidas || []).forEach(function (v, i) {
+        var ano = di.ano + Math.floor((di.mes + i) / 12), mes0 = (di.mes + i) % 12;
+        semSai[ano + '-' + mes0] = v;
+      });
+    }
+
+    if (!Object.keys(entMensal).length && !Object.keys(semEnt).length) {
+      throw new Error('Não há dados de entradas: a pasta não tem "entradas.xlsx".');
+    }
+    if (!ultimoEnt && !ultimoSai && !semUltimo) {
+      throw new Error('Nenhuma planilha com datas válidas foi encontrada na pasta.');
+    }
+
+    var fechEnt = maior(ultimoFechado(ultimoEnt, incluirParcial, hoje), semUltimo);
+    var fechSai = maior(ultimoFechado(ultimoSai, incluirParcial, hoje), semUltimo);
+    var mesGeral = menor(fechEnt, fechSai);
+    var mesSetores = fechSai || mesGeral;
+
+    var nMeses = idx(mesGeral[0], mesGeral[1]) + 1;
+    var nSetor = idx(mesSetores[0], mesSetores[1]) + 1;
+
+    /* ---- entradas e saidas mensais ---- */
+    var serieEnt = [], serieSai = [], faltas = [];
+    for (var i = 0; i < nMeses; i++) {
+      var ano = ANO_BASE + Math.floor(i / 12), mes0 = i % 12, k = ano + '-' + mes0;
+      var e = (entMensal[k] != null) ? entMensal[k] : semEnt[k];
+      var s = (saiTotal[k] != null) ? saiTotal[k] : semSai[k];
+      if (e == null || s == null) faltas.push(rotuloMes(ano, mes0));
+      serieEnt.push(e == null ? 0 : arred(e));
+      serieSai.push(s == null ? 0 : arred(s));
+    }
+    if (faltas.length) {
+      avisos.push('Meses sem dado nas planilhas (gravados como zero): '
+        + faltas.slice(0, 24).join(', ') + (faltas.length > 24 ? ' ...' : ''));
+    }
+
+    /* ---- series mensais por setor ---- */
+    var nomes = {};
+    Object.keys(saiSetores).forEach(function (k) {
+      Object.keys(saiSetores[k]).forEach(function (s) { nomes[s] = true; });
+    });
+    SETORES_DEDICADOS.forEach(function (s) { nomes[s] = true; });
+
+    var series = {};
+    Object.keys(nomes).sort().forEach(function (nome) {
+      series[nome] = new Array(nSetor).fill(null);
+    });
+    Object.keys(saiSetores).forEach(function (k) {
+      var partes = k.split('-'), p = idx(parseInt(partes[0], 10), parseInt(partes[1], 10));
+      if (p < 0 || p >= nSetor) return;
+      Object.keys(saiSetores[k]).forEach(function (setor) {
+        if (!series[setor]) series[setor] = new Array(nSetor).fill(null);
+        series[setor][p] = saiSetores[k][setor];
+      });
+    });
+
+    /* Obras/Imoveis/Comunicacao podem continuar vindo dos numeros ja
+       conciliados do dashboard antigo, guardados na semente. */
+    if (!usarLedgerParaOIC && semente && semente.setorMensal) {
+      var sm = semente.setorMensal;
+      var dis = sm.dataInicio || { ano: ANO_BASE, mes: 0 };
+      var desloc = idx(dis.ano, dis.mes);
+      SETORES_DEDICADOS.forEach(function (nome) {
+        if (!Array.isArray(sm[nome])) return;
+        sm[nome].forEach(function (v, j) {
+          var p = desloc + j;
+          if (v != null && p >= 0 && p < nSetor) series[nome][p] = v;
+        });
+      });
+    }
+
+    var anosLedger = {};
+    Object.keys(saiSetores).forEach(function (k) { anosLedger[k.split('-')[0]] = true; });
+    var anos = Object.keys(anosLedger).map(Number).sort(function (a, b) { return a - b; });
+
+    function mediaAno(nome, ano) {
+      var vals = [];
+      for (var m = 0; m < 12; m++) {
+        var p = idx(ano, m);
+        if (p >= 0 && p < nSetor && series[nome] && series[nome][p] != null) vals.push(series[nome][p]);
+      }
+      if (!vals.length) return null;
+      return arred(vals.reduce(function (a, b) { return a + b; }, 0) / vals.length);
+    }
+
+    /* ---- evolucao anual ---- */
+    var evol = { labels: anos.map(String) };
+    SETORES_HISTORICO.forEach(function (nome) {
+      if (series[nome]) {
+        evol[nome] = anos.map(function (a) { return mediaAno(nome, a); });
+      }
+    });
+
+    /* ---- roscas e tabela por setor ---- */
+    var completo = {};
+    anos.forEach(function (ano) {
+      var lista = Object.keys(series).map(function (nome) {
+        return { nome: nome, valor: mediaAno(nome, ano) };
+      }).filter(function (x) { return x.valor; });
+      lista.sort(function (a, b) { return b.valor - a.valor; });
+      if (lista.length) completo[String(ano)] = lista;
+    });
+
+    var payload = {
+      entradas: serieEnt,
+      saidas: serieSai,
+      nMeses: nMeses,
+      dataInicio: { ano: ANO_BASE, mes: 0 },
+      atualizadoAte: ('0' + (mesGeral[1] + 1)).slice(-2) + '/' + mesGeral[0],
+      atualizadoAteSetores: ('0' + (mesSetores[1] + 1)).slice(-2) + '/' + mesSetores[0],
+      setorMensal: { nMeses: nSetor, dataInicio: { ano: ANO_BASE, mes: 0 } },
+      setorMensalTodos: { dataInicio: { ano: ANO_BASE, mes: 0 }, nMeses: nSetor, series: series },
+      setorEvolucao: evol,
+      setoresCompleto: completo
+    };
+    SETORES_HISTORICO.forEach(function (nome) {
+      if (series[nome]) payload.setorMensal[nome] = series[nome];
+    });
+
+    /* O dashboard le essas duas chaves pelo nome: sempre devem existir. */
+    [2025, 2026].forEach(function (ano) {
+      payload['setores' + ano] = (completo[String(ano)] || []).slice(0, 10);
+      if (!completo[String(ano)]) {
+        avisos.push('Sem dados de ' + ano + ': a rosca desse ano ficará vazia '
+          + '(falta o arquivo ' + ano + '.xlsx na pasta da base).');
+      }
+    });
+
+    /* ---- mes em andamento (parcial) ----
+       So existe quando o mes seguinte ao ultimo fechado e o mes corrente do
+       calendario e tem lancamentos. Nao entra em nenhuma media/serie acima:
+       o dashboard apenas o exibe a parte, marcado como parcial. */
+    function proximo(m) { return m[1] === 11 ? [m[0] + 1, 0] : [m[0], m[1] + 1]; }
+    function ehCorrente(m) { return m[0] > hoje[0] || (m[0] === hoje[0] && m[1] >= hoje[1]); }
+    var P = proximo(mesGeral), kP = P[0] + '-' + P[1];
+    if (!incluirParcial && ehCorrente(P) && (entMensal[kP] != null || saiTotal[kP] != null)) {
+      var dEnt = entradas ? entradas.ultimoData : null, dSai = ultimoDataSai;
+      payload.parcial = {
+        ano: P[0], mes: P[1], rotulo: rotuloMes(P[0], P[1]),
+        entradas: entMensal[kP] != null ? arred(entMensal[kP]) : null,
+        saidas: saiTotal[kP] != null ? arred(saiTotal[kP]) : null,
+        ateEntradas: (dEnt && dEnt[0] === P[0] && dEnt[1] === P[1]) ? diaMes(dEnt) : null,
+        ateSaidas: (dSai && dSai[0] === P[0] && dSai[1] === P[1]) ? diaMes(dSai) : null
+      };
+    }
+    var PS = proximo(mesSetores), kPS = PS[0] + '-' + PS[1];
+    if (!incluirParcial && ehCorrente(PS) && saiSetores[kPS]) {
+      var valores = {};
+      Object.keys(saiSetores[kPS]).forEach(function (nome) { valores[nome] = arred(saiSetores[kPS][nome]); });
+      payload.parcialSetores = {
+        ano: PS[0], mes: PS[1], rotulo: rotuloMes(PS[0], PS[1]), valores: valores,
+        ate: (ultimoDataSai && ultimoDataSai[0] === PS[0] && ultimoDataSai[1] === PS[1]) ? diaMes(ultimoDataSai) : null
+      };
+    }
+
+    /* ---- composicao do ultimo mes fechado ---- */
+    var p = idx(mesSetores[0], mesSetores[1]);
+    var listaMes = Object.keys(series)
+      .filter(function (s) { return series[s][p]; })
+      .map(function (s) { return { nome: s, valor: series[s][p] }; });
+    listaMes.sort(function (a, b) { return b.valor - a.valor; });
+    if (listaMes.length) {
+      payload.setorUltimoMes = { rotulo: payload.atualizadoAteSetores, setores: listaMes.slice(0, 10) };
+    } else {
+      avisos.push('Sem lançamentos em ' + payload.atualizadoAteSetores
+        + ': a rosca do último mês não foi gerada.');
+    }
+
+    anos.forEach(function (ano) {
+      var fora = (completo[String(ano)] || []).slice(10).map(function (s) { return s.nome; });
+      if (fora.length) {
+        avisos.push(ano + ': ' + completo[String(ano)].length + ' setores no total; fora do '
+          + 'top 10 das roscas (mas presentes na tabela): ' + fora.join(', '));
+      }
+    });
+
+    return payload;
+  }
+
+  var NUCLEO = {
+    ANO_BASE: ANO_BASE,
+    RE_ANO: RE_ANO,
+    RE_ENTRADAS: RE_ENTRADAS,
+    normalizar: normalizar,
+    labelDe: labelDe,
+    comoData: comoData,
+    comoNumero: comoNumero,
+    lerEntradas: lerEntradas,
+    lerSaidas: lerSaidas,
+    montarPayload: montarPayload,
+    rotuloMes: rotuloMes
+  };
+
+  global.NucleoBase = NUCLEO;
+  if (typeof module !== 'undefined' && module.exports) module.exports = NUCLEO;
+
+  /* Fora do navegador (testes) o painel nao e montado. */
+  if (typeof document === 'undefined') return;
+
+
+  // ===========================================================================
+  // 2. PAINEL — dados do Drive (PORTAL.carregar) e botao "Atualizar"
+  // ===========================================================================
+  /* No Apps Script nao ha seletor de pasta, IndexedDB nem cache local: a cada
+     abertura (e a cada "Atualizar dados" do menu lateral do shell) as planilhas
+     vem do Drive pelo sincronizador, ja reduzidas pelo reducers/fluxo.py.
+     A interface (status, progresso, estado "sem base") fica na pagina
+     (dash_fluxo.html), que registra seus ganchos em window.__FLUXO_UI:
+       status(texto, tipo) · progresso(texto, pct|null) · ocupado(bool)
+       semBase(titulo, texto, ehErro) · aplicado(meta, dados, erro) */
+
+  var ocupado = false;
+  var NOME_FONTE = 'Google Drive';
+
+  function ui() { return global.__FLUXO_UI || {}; }
+  function dizer(texto, tipo) { if (ui().status) ui().status(texto, tipo); }
+  function mostrarProgresso(texto, pct) { if (ui().progresso) ui().progresso(texto, pct); }
+  function meta() {
+    return (global.DADOS_DASHBOARD && global.DADOS_DASHBOARD.meta) || {};
+  }
+  function ocupar(sim) {
+    ocupado = sim;
+    if (ui().ocupado) ui().ocupado(sim);
+  }
+  /* Texto do estado "base nao carregada" (carregando ou erro) */
+  function avisoSemBase(titulo, texto, ehErro) {
+    if (ui().semBase) ui().semBase(titulo, texto, !!ehErro);
+  }
+
+  function mostrarStatus() {
+    if (!global.DADOS_DASHBOARD || !global.DADOS_DASHBOARD.dados) return;
+    var m = meta(), d = global.DADOS_DASHBOARD.dados;
+    if (global.__erroDashboard) {
+      dizer('Atenção: a base de ' + (m.geradoEm || 'data desconhecida') + ' foi lida, mas '
+        + 'parte do dashboard não pôde ser montada com ela (' + global.__erroDashboard
+        + '). Confira as planilhas e use "Atualizar dados".', 'erro');
+      return;
+    }
+    if (ui().aplicado) ui().aplicado(m, d, null);
+  }
+
+  /* Publica a base e redesenha o dashboard na hora, sem recarregar a pagina. */
+  function aplicar(conteudo) {
+    global.DADOS_DASHBOARD = conteudo;
+    var ok = true;
+    if (global.__renderDashboard) {
+      ok = global.__renderDashboard(JSON.parse(JSON.stringify(conteudo.dados)));
+    }
+    mostrarStatus();
+    return ok;
+  }
+
+  function mensagemDeErro(e) {
+    var msg = e && e.message ? e.message : 'Falha ao ler os dados do Drive.';
+    return msg;
+  }
+
+  function pausa() {
+    return new Promise(function (r) { setTimeout(r, 0); });
+  }
+  /* ---- classificacao das planilhas pelo caminho (pasta + nome) ------------- */
+  /* Tipo sugerido pelo nome de uma pasta ("Entradas", "Saídas", ...) */
+  function tipoDaPasta(nome) {
+    var n = normalizar(nome);
+    if (/SAIDA/.test(n)) return 'saidas';
+    if (/ENTRADA/.test(n)) return 'entradas';
+    return null;
+  }
+
+  /* Classifica uma planilha pelo nome e pela pasta onde esta.
+       - exato: nomes no padrao ("entradas.xlsx", "2026.xlsx", "Saidas_2026.xlsx",
+         "Entradas_2026.xlsx", ou "2026.xlsx" dentro das pastas Entradas/Saidas)
+       - flexivel: qualquer .xlsx com "entradas"/"saidas" ou um ano 20xx no nome
+     Devolve null para o que nao e planilha da base. */
+  function classificarArquivo(nome, tipoPasta) {
+    var n = String(nome).normalize('NFC');
+    if (!/\.xlsx$/i.test(n) || n.indexOf('~$') === 0) return null;
+    var base = normalizar(n.replace(/\.xlsx$/i, ''));
+    var a = base.match(/(?:^|[^0-9])(20\d{2})(?:[^0-9]|$)/);
+    var ano = a ? parseInt(a[1], 10) : null;
+    var temEnt = /ENTRADA/.test(base), temSai = /SAIDA/.test(base);
+    var tipo = temEnt ? 'entradas' : temSai ? 'saidas' : tipoPasta;
+    if (!tipo) tipo = ano ? 'saidas' : null;        // "2026.xlsx" solto = saidas (padrao antigo)
+    if (!tipo) return null;
+    if (tipo === 'saidas' && !ano) return null;      // saidas sao sempre por ano
+    var exato = /^(?:(?:ENTRADAS?|SAIDAS?)[ _-]*)?(?:20\d{2})?$/.test(base) && (ano || temEnt);
+    return { tipo: tipo, ano: ano, exato: !!exato };
+  }
+
+  /* relPath do manifesto ("Entradas/Entradas_2026.xlsx") -> classificacao.
+     Subpastas contam ate 3 niveis, como na varredura da pasta original. */
+  function classificarRelPath(relPath) {
+    var partes = String(relPath).split('/'), tipoPasta = null;
+    if (partes.length - 1 > 3) return null;
+    for (var i = 0; i < partes.length - 1; i++) tipoPasta = tipoDaPasta(partes[i]) || tipoPasta;
+    var nome = partes[partes.length - 1];
+    if (nome.charAt(0) === '.' || nome.indexOf('~$') === 0) return null;
+    return classificarArquivo(nome, tipoPasta);
+  }
+
+  /* Escolhe um arquivo por "chave" (saidas de cada ano; entradas de cada ano
+     ou a geral) e gera os avisos de repeticao/reconhecimento. */
+  function escolherArquivos(achados, ignorados, avisos) {
+    var porChave = {};
+    achados.forEach(function (a) {
+      var k = (a.tipo === 'entradas' ? 'ent' : 'sai') + (a.ano || 'geral');
+      (porChave[k] = porChave[k] || []).push(a);
+    });
+    var escolhidos = [];
+    Object.keys(porChave).forEach(function (k) {
+      var lista = porChave[k].sort(function (x, y) {
+        if (x.exato !== y.exato) return x.exato ? -1 : 1;
+        return (y.modificado || 0) - (x.modificado || 0);
+      });
+      escolhidos.push(lista[0]);
+      if (lista.length > 1) {
+        var o = lista[0].tipo === 'entradas' ? 'as entradas' + (lista[0].ano ? ' de ' + lista[0].ano : '')
+                                              : 'as saídas de ' + lista[0].ano;
+        avisos.push('Mais de um arquivo para ' + o + ': '
+          + lista.map(function (x) { return '"' + x.nome + '"'; }).join(', ')
+          + '. Foi usado "' + lista[0].nome + '"'
+          + (lista[0].exato ? ' (nome no padrão).' : ' (o mais recente).'));
+      }
+    });
+    escolhidos.forEach(function (a) {
+      if (!a.exato) avisos.push('"' + a.nome + '" foi reconhecido como '
+        + (a.tipo === 'entradas' ? 'entradas' : 'saídas') + (a.ano ? ' de ' + a.ano : '') + '.');
+    });
+    if (ignorados.length) {
+      avisos.push('Planilhas ignoradas (sem "entradas"/"saídas" nem um ano como 2026 no nome): '
+        + ignorados.join(', ') + '.');
+    }
+    if (escolhidos.length && !escolhidos.some(function (a) { return a.tipo === 'saidas'; })) {
+      avisos.push('Nenhuma planilha de SAÍDAS por ano foi encontrada (ex.: "Saidas_2026.xlsx" ou a pasta "Saídas"). '
+        + 'Entradas e fluxo usam o histórico publicado, mas os gráficos e tabelas de setores ficam sem dados.');
+    }
+    if (escolhidos.length && !escolhidos.some(function (a) { return a.tipo === 'entradas'; })) {
+      avisos.push('Nenhuma planilha de ENTRADAS foi encontrada (ex.: "Entradas_2026.xlsx" ou a pasta "Entradas"): '
+        + 'as entradas vêm só do histórico publicado.');
+    }
+    return escolhidos;
+  }
+
+  /* Junta as planilhas de entradas (uma por ano e/ou uma geral) em um so
+     resumo mensal. Meses de um ano que tem planilha propria vem dela; a
+     planilha geral completa os demais. O mesmo mes em duas planilhas por ano
+     e somado e gera aviso de possivel duplicidade. */
+  function juntarEntradas(lista, avisos) {
+    if (!lista.length) return null;
+    var porAno = lista.filter(function (d) { return d.ano; });
+    var geral = lista.filter(function (d) { return !d.ano; });
+    var mensal = {}, origem = {}, linhas = 0, ultimo = null, ultimoData = null, duplicados = [];
+    porAno.forEach(function (d) {
+      Object.keys(d.mensal).forEach(function (k) {
+        if (origem[k]) duplicados.push(k.replace(/^(\d+)-(\d+)$/, function (_, a, m) {
+          return ('0' + (+m + 1)).slice(-2) + '/' + a; }) + ' (' + origem[k] + ' e ' + d.nomeArquivo + ')');
+        mensal[k] = arred((mensal[k] || 0) + d.mensal[k]);
+        origem[k] = d.nomeArquivo;
+      });
+    });
+    geral.forEach(function (d) {
+      Object.keys(d.mensal).forEach(function (k) {
+        if (!origem[k]) { mensal[k] = d.mensal[k]; origem[k] = d.nomeArquivo; }
+      });
+    });
+    lista.forEach(function (d) {
+      linhas += d.linhas;
+      ultimoData = maisRecente(ultimoData, d.ultimoData);
+      if (d.ultimo && (!ultimo || d.ultimo[0] > ultimo[0] || (d.ultimo[0] === ultimo[0] && d.ultimo[1] > ultimo[1]))) ultimo = d.ultimo;
+    });
+    if (duplicados.length) {
+      avisos.push('Mês presente em mais de uma planilha de entradas (os valores foram somados; confira se não há '
+        + 'lançamento repetido): ' + duplicados.slice(0, 6).join('; ') + (duplicados.length > 6 ? '…' : '') + '.');
+    }
+    if (porAno.length && geral.length) {
+      avisos.push('Há planilhas de entradas por ano e também uma geral ("' + geral[0].nomeArquivo + '"): '
+        + 'os anos com planilha própria usam ela; a geral só completa os outros meses.');
+    }
+    return { mensal: mensal, linhas: linhas, ultimo: ultimo, ultimoData: ultimoData };
+  }
+
+  /* Le os workbooks (um por planilha escolhida) e monta o conteudo do dashboard. */
+  function processarItens(escolhidos, ignorados, avisos, geradoDrive, t0) {
+    var lidos = {};
+    escolhidos.sort(function (a, b) { return (a.ano || 0) - (b.ano || 0); });
+
+    function passo(i) {
+      if (i >= escolhidos.length) return Promise.resolve();
+      var alvo = escolhidos[i], dados;
+      try {
+        dados = (alvo.tipo === 'entradas')
+          ? lerEntradas(alvo.workbook, alvo.nome)
+          : lerSaidas(alvo.workbook, alvo.nome);
+      } catch (e) {
+        // Nome fora do padrao + colunas erradas: provavelmente nao e planilha
+        // da base (ex.: "Relatorio 2025.xlsx"). Pula e avisa.
+        if (alvo.exato) throw e;
+        avisos.push('"' + alvo.nome + '" foi ignorado: ' + e.message);
+        alvo.workbook = null;
+        return pausa().then(function () { return passo(i + 1); });
+      }
+      alvo.workbook = null;              // libera a memoria da planilha
+      dados.tipo = alvo.tipo;
+      dados.ano = alvo.ano;
+      lidos[alvo.nome] = dados;
+      mostrarProgresso('Lido ' + alvo.nome, ((i + 1) / escolhidos.length) * 100);
+      return pausa().then(function () { return passo(i + 1); });
+    }
+
+    return passo(0).then(function () {
+      mostrarProgresso('Consolidando...', 98);
+      return pausa();
+    }).then(function () {
+      var listaEntradas = [], saidas = {}, linhas = 0, naoMapeados = {};
+      Object.keys(lidos).forEach(function (nome) {
+        var d = lidos[nome];
+        linhas += d.linhas;
+        if (d.ruinsData) avisos.push(nome + ': ' + d.ruinsData + ' linha(s) com data inválida foram ignoradas.');
+        if (d.ruinsValor) avisos.push(nome + ': ' + d.ruinsValor + ' linha(s) com valor inválido viraram zero.');
+        if (d.semDep) avisos.push(nome + ': ' + d.semDep + ' lançamento(s) sem departamento.');
+        Object.keys(d.naoMapeados || {}).forEach(function (dep) {
+          naoMapeados[dep] = (naoMapeados[dep] || 0) + d.naoMapeados[dep];
+        });
+        if (d.tipo === 'entradas') { d.nomeArquivo = nome; listaEntradas.push(d); } else saidas[d.ano] = d;
+      });
+      var entradas = juntarEntradas(listaEntradas, avisos);
+      if (Object.keys(naoMapeados).length) {
+        avisos.push('Departamentos novos (incluídos com o nome formatado): '
+          + Object.keys(naoMapeados).sort().map(function (d) {
+              return d + ' (' + naoMapeados[d] + ')';
+            }).join(', '));
+      }
+
+      var payload = montarPayload({
+        entradas: entradas, saidas: saidas,
+        semente: global.SEMENTE_HISTORICO || null, avisos: avisos
+      });
+
+      var agora = new Date();
+      return {
+        meta: {
+          geradoEm: agora.toLocaleDateString('pt-BR') + ' ' + agora.toTimeString().slice(0, 5),
+          sincronizadoEm: geradoDrive || null,
+          pastaBd: NOME_FONTE, linhas: linhas,
+          arquivos: Object.keys(lidos).sort(),
+          resumo: (function () {
+            var anos = [], ne = 0, ns = 0;
+            Object.keys(lidos).forEach(function (k) {
+              var d = lidos[k]; if (d.tipo === 'entradas') ne++; else ns++;
+              if (d.ano) anos.push(d.ano);
+            });
+            anos.sort();
+            return { entradas: ne, saidas: ns, de: anos[0] || null, ate: anos[anos.length - 1] || null };
+          })(),
+          avisos: avisos.slice(),
+          segundos: Math.round((Date.now() - t0) / 100) / 10
+        },
+        dados: payload
+      };
+    });
+  }
+
+  /* Baixa as planilhas do Drive (PORTAL.carregar) e devolve o conteudo do dashboard */
+  function lerDoDrive() {
+    var avisos = [], ignorados = [], t0 = Date.now();
+    if (!global.PORTAL || !global.XLSX) {
+      return Promise.reject(new Error('A biblioteca de dados (PORTAL/SheetJS) não foi carregada. Recarregue a página.'));
+    }
+    return global.PORTAL.carregar('fluxo', {
+      cellDates: true,
+      paralelo: 3,
+      filtro: function (a) {
+        if (classificarRelPath(a.relPath)) return true;
+        ignorados.push(a.relPath);
+        return false;
+      },
+      onProgress: function (feitos, total, arq) {
+        mostrarProgresso('Carregando ' + arq + ' (' + feitos + '/' + total + ')', (feitos / total) * 90);
+      }
+    }).then(function (res) {
+      if (!res.itens.length) {
+        throw new Error('Nenhuma planilha da base foi encontrada no Drive. Esperado: '
+          + '"Entradas_2026.xlsx" e "Saidas_2026.xlsx" (nas pastas "Entradas" e "Saídas"). '
+          + 'Confira se o sincronizador já exportou a pasta "fluxo_de_caixa".'
+          + (ignorados.length ? ' Ignoradas: ' + ignorados.join(', ') + '.' : ''));
+      }
+      var achados = res.itens.map(function (it) {
+        var c = classificarRelPath(it.relPath);
+        return { nome: it.relPath, tipo: c.tipo, ano: c.ano, exato: c.exato,
+                 modificado: (it.mtime || 0) * 1000, workbook: it.workbook };
+      });
+      var escolhidos = escolherArquivos(achados, ignorados, avisos);
+      var gerado = null;
+      if (res.geradoEm) {
+        var g = new Date(res.geradoEm);
+        if (!isNaN(g)) gerado = g.toLocaleDateString('pt-BR') + ' ' + g.toTimeString().slice(0, 5);
+      }
+      return processarItens(escolhidos, ignorados, avisos, gerado, t0).then(function (conteudo) {
+        return { conteudo: conteudo, avisos: avisos };
+      });
+    });
+  }
+
+  /* (Re)carrega do Drive e atualiza o dashboard. */
+  function atualizar() {
+    if (ocupado) return Promise.resolve(false);
+    ocupar(true);
+    dizer('Carregando os dados do Drive...');
+    if (!global.DADOS_DASHBOARD) avisoSemBase('Carregando dados do Drive…',
+      'Estamos baixando as planilhas de Entradas e Saídas. Isso leva alguns segundos.');
+    return lerDoDrive().then(function (r) {
+      mostrarProgresso(null);
+      var ok = aplicar(r.conteudo);
+      if (ok) {
+        dizer('Dashboard atualizado em ' + r.conteudo.meta.geradoEm + ' · leitura em '
+          + r.conteudo.meta.segundos + 's'
+          + (r.conteudo.meta.sincronizadoEm ? ' · base sincronizada em ' + r.conteudo.meta.sincronizadoEm : '')
+          + (r.conteudo.dados.atualizadoAte ? ' · dados até ' + r.conteudo.dados.atualizadoAte : ''),
+          'ok');
+      } // se !ok, aplicar() -> mostrarStatus() ja exibiu o aviso de erro
+      if (r.avisos.length) console.warn('Avisos da base:\n- ' + r.avisos.join('\n- '));
+      ocupar(false);
+      return ok;
+    }).catch(function (e) {
+      mostrarProgresso(null);
+      ocupar(false);
+      // Mantem na tela a ultima base valida; so informa o problema.
+      dizer(mensagemDeErro(e), 'erro');
+      if (!global.DADOS_DASHBOARD) avisoSemBase('Não foi possível carregar os dados', mensagemDeErro(e)
+        + ' Use "Atualizar dados" para tentar de novo.', true);
+      console.error('Falha ao carregar os dados do Drive:', e);
+      return false;
+    });
+  }
+
+  /* ---- montagem ----------------------------------------------------------- */
+  global.FluxoBase = { atualizar: atualizar };
+
+  function montar() {
+    if (!global.__FLUXO_UI) return;     // a pagina registra os ganchos antes deste script
+    // Sem dados ainda: mostra o estado "carregando" e ja busca no Drive
+    if (global.__renderDashboard) global.__renderDashboard(null);
+    atualizar();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', montar);
+  } else {
+    montar();
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>

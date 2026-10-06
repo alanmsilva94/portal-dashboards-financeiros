@@ -1,0 +1,292 @@
+<script>
+/* ===== js/config.js ===== */
+/* =========================================================================
+   config.js — configuração central (substitui o config.py)
+
+   Altere aqui a identidade e as regras de negócio. Nenhum outro arquivo
+   precisa ser editado para os ajustes do dia a dia.
+
+   Os arquivos são carregados como script comum (não como módulo ES) porque
+   o Chrome e o Edge bloqueiam `import` em páginas abertas por file:// — e o
+   painel precisa abrir com duplo clique, direto da pasta da rede.
+   ========================================================================= */
+
+window.App = window.App || { utils: {}, models: {}, views: {}, controllers: {} };
+
+App.Config = {
+  /* ---------------------------------------------------------- identidade */
+  marca: {
+    titulo: "Dashboard - Máquinas de Cartões",
+    subtitulo: "Receita e cobertura de PDVs",
+    /* o menu lateral não quebra linha: use rótulos curtos */
+    nome: "Máquinas de Cartões",
+    sub: "Painel de receita",
+  },
+
+  /* paleta das roscas: reserva; a paleta real vem do shell (--graf-1 a --graf-8).
+     Validada para contraste e daltonismo; a ordem é fixa — cada categoria
+     mantém a mesma cor quando os filtros mudam. O tema (shell) tem prioridade. */
+  paleta: ["#0051D5", "#003594", "#316BF3", "#60A5FA", "#93C5FD", "#0EA5E9", "#6366F1", "#94A3B8"],
+
+  /* ---------------------------------------------------------- colunas
+     Apelidos EXTRA de cabeçalho, para quando a planilha usar um nome que o
+     leitor ainda não conhece. Ex.: "igreja_desc": ["Classificação da Unidade"] */
+  aliasColunasExtra: {
+    igreja_desc: [],
+    regiao: [],
+    estado: [],
+    municipio: [],
+    modelo: [],
+    tipo: [],
+    bandeira: [],
+    valor: [],
+    status: [],
+    data: [],
+    pdv: [],
+    igreja_id: [],
+  },
+
+  /* ---------------------------------------------------------- regras */
+  regras: {
+    /* status que contam como RECEITA; comparados sem acento e sem caixa */
+    statusAprovados: [
+      "aprovada", "aprovado", "autorizada", "autorizado", "confirmada", "confirmado",
+      "concluida", "concluido", "paga", "pago", "efetivada", "liquidada", "sucesso",
+      "capturada",
+    ],
+    /* PDV ATIVO = pelo menos N transações aprovadas no período filtrado */
+    minTransacoesAtivo: 1,
+    /* rótulo das transações da aba Pix (vira "Tipo" e "Bandeira") */
+    rotuloPix: "Pix",
+    /* rótulo único para PDV sem localidade identificável */
+    semLocalidade: "Sem localidade",
+  },
+
+  /* aviso no log quando o cubo agregado passar deste número de linhas */
+  limiteLinhasCubo: 250000,
+
+  /* subir este número invalida bases salvas em formato antigo */
+  versaoEsquema: 1,
+};
+
+/* ===== js/utils/texto.js ===== */
+/* =========================================================================
+   utils/texto.js — normalização de texto, número e data (substitui utils.py)
+
+   Tolera as variações das planilhas feitas à mão: acentos, caixa, espaços
+   extras, "R$ 1.234,56", datas em texto ou como serial do Excel.
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  /* 'Desc.Região ' -> 'descregiao'. Base de toda comparação de nomes. */
+  function slug(v) {
+    if (v === null || v === undefined) return "";
+    return String(v)
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  }
+
+  /* devolve o cabeçalho real cujo slug bate com um dos apelidos */
+  function acharColuna(cabecalhos, aliases) {
+    const mapa = new Map();
+    cabecalhos.forEach((c) => mapa.set(slug(c), c));
+    for (const alias of aliases) {
+      const k = slug(alias);
+      if (mapa.has(k)) return mapa.get(k);
+    }
+    /* segunda passada: correspondência parcial ('valortransacao' em 'valordatransacao') */
+    for (const alias of aliases) {
+      const k = slug(alias);
+      if (!k) continue;
+      for (const [chave, real] of mapa) {
+        if (chave.includes(k) || k.includes(chave)) return real;
+      }
+    }
+    return null;
+  }
+
+  /* tira espaços das pontas, colapsa os internos; vazio, "-" e "nan" viram padrão */
+  function texto(v, padrao) {
+    if (v === null || v === undefined) return padrao;
+    const t = String(v).trim().replace(/\s+/g, " ");
+    if (!t || t === "-" || t.toLowerCase() === "nan") return padrao;
+    return t;
+  }
+
+  /* equivale ao .str.title() do pandas ("Centro-Oeste", não "Centro-oeste") */
+  function capitalizar(t) {
+    return t.replace(/\p{L}+/gu, (p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase());
+  }
+
+  const naoInformado = (v) => texto(v, "") === "";
+
+  /* padroniza chaves de junção (PDV / ID): 1234.0 -> "1234", maiúsculas */
+  function chave(v) {
+    if (v === null || v === undefined) return null;
+    const t = String(v).trim().replace(/\.0$/, "").toUpperCase();
+    if (!t || t === "NAN" || t === "NONE") return null;
+    return t;
+  }
+
+  /* aceita 1234.56 | "1.234,56" | "R$ 1.234,56" | "(50,00)" */
+  function paraFloat(v) {
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (v === null || v === undefined) return null;
+
+    let t = String(v).trim().replace(/r\$/gi, "").replace(/[\s ]/g, "");
+    if (!t) return null;
+
+    let negativo = false;
+    if (t.startsWith("(") && t.endsWith(")")) {
+      negativo = true;
+      t = t.slice(1, -1);
+    }
+    if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+
+    const n = parseFloat(t);
+    if (!isFinite(n)) return null;
+    return negativo ? -n : n;
+  }
+
+  /* aceita Date | serial do Excel | "dd/mm/aaaa" | "aaaa-mm-dd" */
+  function paraData(v) {
+    if (v instanceof Date && !isNaN(v)) return v;
+    if (typeof v === "number" && isFinite(v)) {
+      return new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+    }
+    if (!v) return null;
+
+    const t = String(v).trim();
+    let m = t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (m) {
+      let ano = parseInt(m[3], 10);
+      if (ano < 100) ano += 2000;
+      return new Date(ano, parseInt(m[2], 10) - 1, parseInt(m[1], 10));
+    }
+    m = t.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+
+    const d = new Date(t);
+    return isNaN(d) ? null : d;
+  }
+
+  /* os rótulos vêm de planilha: sempre escapar antes de injetar HTML */
+  const esc = (t) =>
+    String(t === null || t === undefined ? "" : t)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const ordenarPt = (conjunto) => Array.from(conjunto).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  const indexar = (lista) => {
+    const m = new Map();
+    lista.forEach((v, i) => m.set(v, i));
+    return m;
+  };
+
+  App.utils.texto = {
+    slug, acharColuna, texto, capitalizar, naoInformado, chave,
+    paraFloat, paraData, esc, ordenarPt, indexar,
+  };
+})(window.App);
+
+/* ===== js/utils/formato.js ===== */
+/* =========================================================================
+   utils/formato.js — formatação pt-BR de moeda, inteiro e percentual
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const nfMoeda = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+  const nfMoeda0 = new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    maximumFractionDigits: 0,
+  });
+  const nfInt = new Intl.NumberFormat("pt-BR");
+  const nfDec = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+  App.utils.formato = {
+    moeda: (v) => nfMoeda.format(v || 0),
+    moedaCurta: (v) => nfMoeda0.format(v || 0),
+    inteiro: (v) => nfInt.format(v || 0),
+    decimal: (v) => nfDec.format(v || 0),
+    pct: (v) => nfDec.format(v || 0) + "%",
+    mb: (bytes) => (bytes / 1048576).toFixed(2) + " MB",
+    /* "2026-03" -> "mar/26" */
+    rotuloMes: (am) => `${MESES_CURTOS[+am.slice(5) - 1]}/${am.slice(2, 4)}`,
+    dataHora: (d) =>
+      `${d.toLocaleDateString("pt-BR")} às ${d.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`,
+  };
+})(window.App);
+
+/* ===== js/utils/emissor.js ===== */
+/* =========================================================================
+   utils/emissor.js — publicação/assinatura de eventos
+
+   É o que mantém o MVC desacoplado: o Model avisa "mudei", o Controller
+   escuta e manda a View redesenhar. A View nunca conhece o Model.
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  class Emissor {
+    constructor() {
+      this._ouvintes = new Map();
+    }
+
+    on(evento, fn) {
+      if (!this._ouvintes.has(evento)) this._ouvintes.set(evento, new Set());
+      this._ouvintes.get(evento).add(fn);
+      return () => this._ouvintes.get(evento).delete(fn);
+    }
+
+    emit(evento, dados) {
+      const lista = this._ouvintes.get(evento);
+      if (lista) lista.forEach((fn) => fn(dados));
+    }
+  }
+
+  App.utils.Emissor = Emissor;
+})(window.App);
+
+/* ===== js/utils/uf.js ===== */
+/* =========================================================================
+   utils/uf.js — nome por extenso das 27 unidades da federação
+
+   A planilha traz só a sigla; a tabela por estado mostra "SP · São Paulo" e a
+   busca aceita os dois. Valor que não é sigla conhecida aparece como veio.
+   ========================================================================= */
+
+(function (App) {
+  "use strict";
+
+  const NOMES = {
+    AC: "Acre", AL: "Alagoas", AP: "Amapá", AM: "Amazonas", BA: "Bahia", CE: "Ceará",
+    DF: "Distrito Federal", ES: "Espírito Santo", GO: "Goiás", MA: "Maranhão",
+    MT: "Mato Grosso", MS: "Mato Grosso do Sul", MG: "Minas Gerais", PA: "Pará",
+    PB: "Paraíba", PR: "Paraná", PE: "Pernambuco", PI: "Piauí", RJ: "Rio de Janeiro",
+    RN: "Rio Grande do Norte", RS: "Rio Grande do Sul", RO: "Rondônia", RR: "Roraima",
+    SC: "Santa Catarina", SP: "São Paulo", SE: "Sergipe", TO: "Tocantins",
+  };
+
+  App.utils.uf = {
+    /* "SP" -> "São Paulo"; outro texto -> null */
+    nome: (sigla) => NOMES[String(sigla || "").trim().toUpperCase()] || null,
+  };
+})(window.App);
+
+</script>

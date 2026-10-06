@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Cartões Corporativos</title>
+<?!= include('shell_portal') ?>
+<?!= include('portal_dados') ?>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* Estilos próprios do dashboard Cartões Corporativos (prefixo .ct-). Cores somente por variáveis do shell (claro/escuro). */
+.ct-cw{position:relative;width:100%;height:280px}
+.ct-cw.alto{height:320px} .ct-cw.rosca{height:220px} .ct-cw.peq{height:240px}
+.ct-acoes{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ct-switch{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border-radius:8px;background:var(--low);font-size:12px;font-weight:600;color:var(--on-surface)}
+.ct-switch:hover{background:var(--high)}
+.ct-switch i{position:relative;width:32px;height:18px;border-radius:999px;background:var(--outline);transition:background .15s;flex:none}
+.ct-switch i::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--lowest);transition:transform .15s}
+.ct-switch[aria-checked="true"] i{background:var(--secondary)}
+.ct-switch[aria-checked="true"] i::after{transform:translateX(14px)}
+#portal-conteudo button:focus-visible,#filtros button:focus-visible,#filtros select:focus-visible,#portal-conteudo input:focus-visible,#portal-conteudo select:focus-visible{outline:2px solid var(--secondary);outline-offset:2px}
+
+/* faixa de filtros em pílulas */
+.ct-pill{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 4px 0 12px;border-radius:999px;border:1px solid var(--outline-variant);background:var(--lowest)}
+.ct-pill:focus-within{border-color:var(--secondary)}
+.ct-pill>span{font-size:11px;font-weight:600;color:var(--on-variant);white-space:nowrap}
+.ct-pill .portal-sel{border:0;background:transparent;height:28px;padding:0 6px;max-width:170px;font-weight:600}
+.ct-pill option{background:var(--lowest);color:var(--on-surface)}
+.ct-pill.ativo{border-color:var(--secondary);background:var(--info-bg)}
+.ct-limpar{display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--secondary)}
+.ct-limpar:hover{background:var(--high)} .ct-limpar .material-symbols-outlined{font-size:16px}
+
+/* estado de carregamento / erro */
+.ct-estado{max-width:560px;margin:48px auto;text-align:center;padding:32px;display:flex;flex-direction:column;gap:12px;align-items:center}
+.ct-estado[hidden]{display:none}
+.ct-estado .t{font-size:18px;font-weight:600} .ct-estado .portal-progress{width:100%;max-width:360px}
+.ct-estado .portal-progress>i{width:0;transition:width .25s}
+#portal-conteudo.ct-sem>section{display:none!important}
+
+/* KPIs */
+.ct-kpi .valor{font-size:26px}
+.ct-kpi .portal-progress{height:6px}
+.ct-spark{color:var(--on-inverse);width:100%;height:44px;display:block}
+.ct-spark path.l{fill:none;stroke:currentColor;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+.ct-spark path.a{fill:currentColor;opacity:.16;stroke:none}
+.ct-kpi .sub b{color:inherit}
+
+/* legenda das roscas */
+.ct-leg{list-style:none;margin:0;padding:0;font-size:12px;display:flex;flex-direction:column;gap:2px}
+.ct-leg li{display:grid;grid-template-columns:12px minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:4px 6px;border-radius:6px}
+.ct-leg li:hover{background:var(--low)}
+.ct-leg i{width:10px;height:10px;border-radius:50%;display:block}
+.ct-leg .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.ct-leg .vl{color:var(--on-variant);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ct-leg .pc{min-width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+
+/* insights */
+.ct-ins-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.ct-ins{display:flex;gap:12px;padding:16px;align-items:flex-start}
+.ct-ins .ic{width:36px;height:36px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--info-bg);color:var(--info)}
+.ct-ins.k-alert .ic{background:var(--bad-bg);color:var(--bad)} .ct-ins.k-pos .ic{background:var(--ok-bg);color:var(--ok)}
+.ct-ins.k-warn .ic{background:var(--warn-bg);color:var(--warn)}
+.ct-ins .h{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--on-variant);margin-bottom:4px}
+.ct-ins p{font-size:13px;line-height:20px}
+
+/* árvore de decomposição (colunas: Ano > Departamento > Natureza > Descrição) */
+.ct-tree{display:flex;gap:18px;overflow-x:auto;margin-top:4px;padding-bottom:6px;align-items:flex-start}
+.ct-lv{flex:1 1 0;min-width:230px}
+.ct-lv-h{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--primary);margin:0 0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ct-no{border:1px solid color-mix(in srgb,var(--outline-variant) 70%,transparent);border-radius:12px;padding:10px;margin-bottom:8px;background:var(--lowest);transition:border-color .15s,transform .15s,background .15s}
+.ct-no.clk{cursor:pointer} .ct-no.clk:hover{border-color:var(--secondary);transform:translateX(2px)}
+.ct-no.sel{border-color:var(--secondary);background:color-mix(in srgb,var(--secondary) 8%,var(--lowest))}
+.ct-no .n{display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:13px}
+.ct-no .n span:first-child{overflow-wrap:anywhere} .ct-no .n span:last-child{white-space:nowrap;font-variant-numeric:tabular-nums}
+.ct-no .b{height:6px;border-radius:6px;background:var(--high);margin-top:8px;overflow:hidden}
+.ct-no .b i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--primary),var(--secondary))}
+.ct-no .s{font-size:11px;color:var(--on-variant);margin-top:4px}
+.ct-bar-in{display:flex;align-items:center;gap:8px;min-width:110px}
+.ct-bar-in .portal-progress{flex:1;height:6px}
+
+/* tabela de lançamentos */
+.ct-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ct-tools .portal-input{height:36px;min-width:220px}
+.ct-tools .portal-sel{height:36px;border-radius:8px}
+.ct-th{cursor:pointer;user-select:none} .ct-th:hover{color:var(--on-surface)}
+.ct-th .material-symbols-outlined{font-size:14px;vertical-align:-2px;opacity:.7}
+.ct-pag{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--on-variant)}
+.ct-pag .portal-btn:disabled{opacity:.45;cursor:default}
+.ct-desc{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ct-apenas-print{display:none}
+@media (max-width:760px){
+  .ct-tools .portal-input{min-width:0;flex:1}
+}
+@media print{.ct-acoes{display:none!important} .ct-cw{height:240px}}
+</style>
+</head>
+<body>
+
+<div id="portal-conteudo" hidden>
+
+  <div id="ct-estado" hidden></div>
+
+  <!-- ===================== VISÃO GERAL ===================== -->
+  <section data-pagina="visao"><div class="portal-page">
+    <div class="ct-head" data-t="Cartão de Crédito Corporativo — Controle" data-s="Dashboard analítico dos lançamentos do cartão"></div>
+
+    <div class="g gap-4" id="ct-kpis"></div>
+
+    <div class="g gap-4">
+      <div class="portal-panel c8">
+        <div class="cab"><div><div class="t">Evolução mensal dos gastos</div><div class="s">Colunas = valor do mês · Linha = média móvel (3 meses)</div></div></div>
+        <div class="ct-cw"><canvas id="chMes" role="img" aria-label="Evolução mensal dos gastos com média móvel de 3 meses"></canvas></div>
+      </div>
+      <div class="portal-panel c4">
+        <div class="cab"><div><div class="t">Composição por Natureza</div><div class="s">Participação no total filtrado</div></div></div>
+        <div class="ct-cw rosca"><canvas id="chNatureza" role="img" aria-label="Composição dos gastos por natureza"></canvas></div>
+        <ul class="ct-leg" id="legNat"></ul>
+      </div>
+
+      <div class="portal-panel c5">
+        <div class="cab"><div><div class="t">Ranking por Departamento</div><div class="s">Barras horizontais · maiores consumidores</div></div></div>
+        <div class="ct-cw alto"><canvas id="chDepto" role="img" aria-label="Ranking de gastos por departamento"></canvas></div>
+      </div>
+      <div class="portal-panel c4">
+        <div class="cab"><div><div class="t">Bandeira</div><div class="s">Distribuição do valor</div></div></div>
+        <div class="ct-cw alto"><canvas id="chBandeira" role="img" aria-label="Distribuição do valor por bandeira"></canvas></div>
+      </div>
+      <div class="portal-panel c3">
+        <div class="cab"><div><div class="t">Status</div><div class="s">Validado x demais</div></div></div>
+        <div class="ct-cw alto"><canvas id="chStatus" role="img" aria-label="Distribuição do valor por status"></canvas></div>
+      </div>
+
+      <div class="portal-panel c12">
+        <div class="cab"><div><div class="t">Acumulado no período</div><div class="s">Linha de tendência acumulada por data</div></div></div>
+        <div class="ct-cw"><canvas id="chAcum" role="img" aria-label="Gasto acumulado no período"></canvas></div>
+      </div>
+    </div>
+
+    <div class="portal-panel">
+      <div class="cab"><div><div class="t">Insights automáticos</div><div class="s">Gerados a cada carga/atualização da base</div></div></div>
+      <div class="ct-ins-grid" id="ct-insights"></div>
+    </div>
+  </div></section>
+
+  <!-- ===================== EVOLUÇÃO ===================== -->
+  <section data-pagina="evolucao"><div class="portal-page">
+    <div class="ct-head" data-t="Evolução mensal" data-s="Gasto de cada mês, variação frente ao mês anterior e média móvel de 3 meses"></div>
+    <div class="portal-panel">
+      <div class="cab"><div><div class="t">Demonstrativo mensal</div><div class="s">Mais antigo primeiro · recorte atual dos filtros</div></div></div>
+      <div class="portal-tablewrap"><table class="portal-table" id="ct-tbl-mes"></table></div>
+    </div>
+  </div></section>
+
+  <!-- ===================== DEPARTAMENTOS E NATUREZAS ===================== -->
+  <section data-pagina="deptos"><div class="portal-page">
+    <div class="ct-head" data-t="Departamentos e Naturezas" data-s="Quem consome e em quê: ranking e decomposição Natureza › Departamento › Lançamento"></div>
+    <div class="g gap-4">
+      <div class="portal-panel c6">
+        <div class="cab"><div><div class="t">Por departamento</div><div class="s">Valor e participação no total filtrado</div></div></div>
+        <div class="portal-tablewrap"><table class="portal-table" id="ct-tbl-dep"></table></div>
+      </div>
+      <div class="portal-panel c6">
+        <div class="cab"><div><div class="t">Por natureza</div><div class="s">Valor e participação no total filtrado</div></div></div>
+        <div class="portal-tablewrap"><table class="portal-table" id="ct-tbl-nat"></table></div>
+      </div>
+    </div>
+    <div class="portal-panel">
+      <div class="cab">
+        <div><div class="t">Árvore de decomposição</div><div class="s">Clique nos nós para detalhar: Ano → Departamento → Natureza → Descrição</div></div>
+      </div>
+      <div class="ct-tree" id="ct-tree"></div>
+    </div>
+  </div></section>
+
+  <!-- ===================== LANÇAMENTOS ===================== -->
+  <section data-pagina="lancamentos"><div class="portal-page">
+    <div class="ct-head" data-t="Lançamentos" data-s="Todos os lançamentos do recorte atual dos filtros"></div>
+    <div class="portal-panel">
+      <div class="cab">
+        <div><div class="t">Lançamentos do cartão</div><div class="s" id="ct-lanc-resumo"></div></div>
+        <div class="ct-tools">
+          <input type="search" class="portal-input" id="lcBusca" placeholder="Buscar descrição, cartão, natureza…" aria-label="Buscar lançamentos">
+          <select class="portal-sel" id="lcStatus" aria-label="Filtrar por status"></select>
+          <select class="portal-sel" id="lcTam" aria-label="Linhas por página">
+            <option value="15">15 por página</option><option value="25" selected>25 por página</option><option value="50">50 por página</option><option value="100">100 por página</option>
+          </select>
+        </div>
+      </div>
+      <div class="portal-tablewrap"><table class="portal-table" id="ct-tbl-lanc"></table></div>
+      <div class="ct-pag">
+        <span id="lcInfo"></span>
+        <div class="row gap-2">
+          <button type="button" class="portal-btn" id="lcAnt"><span class="material-symbols-outlined">chevron_left</span>Anterior</button>
+          <span id="lcPag" class="num"></span>
+          <button type="button" class="portal-btn" id="lcProx">Próxima<span class="material-symbols-outlined">chevron_right</span></button>
+        </div>
+      </div>
+    </div>
+  </div></section>
+
+</div>
+
+<script>
+/* =========================================================================
+   CORE — estado, utilitários, leitura do workbook (PORTAL), persistência e filtros
+   ========================================================================= */
+const CHAVE = 'cartoes';
+const AUTO_MS = 5 * 60 * 1000;   // auto-atualização: 5 min
+
+const STATE = { rows: [], filtered: [], charts: {}, auto: true, lastSig: "", timer: null, busy: false,
+                geradoEm: "", nPlan: 0, tree: { dep: null, nat: null },
+                lanc: { q: "", st: "", pg: 1, ps: 25, sk: "valor", sd: -1 } };
+
+const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const brl = v => (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const num = v => (v || 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtData = d => d ? d.toLocaleDateString("pt-BR") : "—";
+const pct = (a, b) => b ? (a / b * 100) : 0;
+const COR = n => PORTAL_SHELL.cor(n);
+
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+const toast = m => PORTAL_SHELL.toast(m);
+const p2 = n => String(n).padStart(2, "0");
+
+function fmtGerado(iso) {
+  if (!iso) return "";
+  const d = new Date(iso); if (isNaN(d)) return String(iso);
+  return p2(d.getDate()) + "/" + p2(d.getMonth() + 1) + "/" + d.getFullYear() + " " + p2(d.getHours()) + ":" + p2(d.getMinutes());
+}
+function statusShell(erro) {
+  if (erro) return PORTAL_SHELL.setStatus({ erro });
+  PORTAL_SHELL.setStatus({ fonte: "Fonte: Google Drive · " + STATE.nPlan + (STATE.nPlan === 1 ? " planilha" : " planilhas"), dados: fmtGerado(STATE.geradoEm) });
+}
+
+/** Converte o workbook (SheetJS, vindo de PORTAL.carregar) em linhas normalizadas. */
+function parseWorkbook(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { defval: null });
+  return raw.map(r => {
+    const g = k => { const key = Object.keys(r).find(x => x.trim().toLowerCase() === k); return key ? r[key] : null; };
+    const d = g("data") ? new Date(g("data")) : null;
+    const mes = g("mês") || g("mes") || (d ? MESES[d.getMonth()] : "—");
+    return {
+      numMes: +(g("núm_mês") || g("num_mes") || (d ? d.getMonth() + 1 : 0)),
+      mes: String(mes), ano: +(g("ano") || (d ? d.getFullYear() : 0)), data: d,
+      bandeira: String(g("bandeira") ?? "—"), cartao: String(g("cartão") ?? g("cartao") ?? "—"),
+      natureza: String(g("natureza") ?? "—"), descricao: String(g("descrição") ?? g("descricao") ?? "—"),
+      valor: +(g("valor") || 0), depto: String(g("departamento") ?? "—"), status: String(g("status") ?? "—")
+    };
+  }).filter(r => r.valor || r.data);
+}
+
+/* Cache dos dados → o dashboard já abre preenchido (opcional; ignora se bloqueado). */
+function saveCache() { lsSet("dashCartoesCache", JSON.stringify({ sig: STATE.lastSig, when: Date.now(), gerado: STATE.geradoEm, n: STATE.nPlan, rows: STATE.rows })); }
+function loadCache() {
+  try {
+    const c = JSON.parse(lsGet("dashCartoesCache") || "null"); if (!c || !c.rows || !c.rows.length) return false;
+    STATE.rows = c.rows.map(r => ({ ...r, data: r.data ? new Date(r.data) : null })); STATE.lastSig = c.sig || "";
+    STATE.geradoEm = c.gerado || ""; STATE.nPlan = c.n || 1;
+    statusShell(); showDash(); buildFilters(); render(); return true;
+  } catch (e) { return false; }
+}
+
+/* ------------------------- estado: carregando / erro -------------------- */
+function showDash() { $("#ct-estado").hidden = true; $("#portal-conteudo").classList.remove("ct-sem"); }
+function showMsg(titulo, det, err, pctv) {
+  $("#portal-conteudo").classList.add("ct-sem");
+  const d = $("#ct-estado"); d.hidden = false;
+  d.className = "portal-card ct-estado";
+  d.innerHTML = err
+    ? `<span class="material-symbols-outlined" style="font-size:36px;color:var(--bad)">error</span><div class="t">${esc(titulo)}</div><div class="muted">${esc(det)}</div>
+       <button type="button" class="portal-btn primario" id="btnTentar"><span class="material-symbols-outlined">refresh</span>Tentar novamente</button>`
+    : `<span class="material-symbols-outlined portal-gira" style="font-size:36px;color:var(--secondary)">sync</span><div class="t">${esc(titulo)}</div><div class="muted">${esc(det || "")}</div>
+       <div class="portal-progress"><i id="ct-bar" style="width:${pctv || 0}%"></i></div>`;
+  const b = $("#btnTentar"); if (b) b.onclick = () => refresh(true);
+}
+
+/** Recarrega a base do Drive (via PORTAL). Sem force, só recarrega se o manifesto mudou. */
+async function refresh(force) {
+  if (STATE.busy) return;
+  STATE.busy = true;
+  const temDados = STATE.rows.length > 0;
+  try {
+    if (!force) {
+      const m = await PORTAL.listar(CHAVE);
+      const sig = (m.geradoEm || "") + "|" + m.arquivos.map(a => a.relPath + ":" + a.mtime).join(",");
+      if (sig === STATE.lastSig && temDados) return;
+    }
+    if (!temDados) showMsg("Carregando dados…", "Buscando a base no Google Drive.", false, 5);
+    const res = await PORTAL.carregar(CHAVE, { cellDates: true, onProgress: (f, t) => { if (!STATE.rows.length) showMsg("Carregando dados…", "Arquivo " + f + " de " + t, false, Math.round(f / t * 100)); } });
+    if (!res.itens.length) throw new Error("Nenhum arquivo de dados encontrado no Drive.");
+    STATE.rows = parseWorkbook(res.itens[0].workbook);
+    STATE.geradoEm = res.geradoEm; STATE.nPlan = res.itens.length;
+    STATE.lastSig = (res.geradoEm || "") + "|" + res.itens.map(i => i.relPath + ":" + i.mtime).join(",");
+    statusShell(); showDash(); buildFilters(); render(); saveCache();
+    if (force) toast("Dados atualizados.");
+  } catch (e) {
+    console.error(e);
+    const msg = (e && e.message) || String(e);
+    statusShell(msg);
+    if (STATE.rows.length) toast("Falha ao atualizar: " + msg);
+    else showMsg("Não foi possível carregar os dados", msg, true);
+  } finally { STATE.busy = false; }
+}
+
+/* ---------------------- ATUALIZAÇÃO AUTOMÁTICA -------------------------- */
+function startAuto() { stopAuto(); if (STATE.auto) STATE.timer = setInterval(() => { if (STATE.auto) refresh(false); }, AUTO_MS); }
+function stopAuto() { if (STATE.timer) { clearInterval(STATE.timer); STATE.timer = null; } }
+function setAuto(on) {
+  STATE.auto = on; lsSet("dashAuto", on ? "1" : "0");
+  document.querySelectorAll(".ct-auto").forEach(b => { b.setAttribute("aria-checked", on ? "true" : "false"); b.querySelector("b").textContent = "Auto: " + (on ? "ON" : "OFF"); });
+  on ? startAuto() : stopAuto();
+}
+
+/* ------------------------------ FILTROS -------------------------------- */
+const FDEF = [["fAno","ano","Ano"],["fMes","mes","Mês"],["fBandeira","bandeira","Bandeira"],["fCartao","cartao","Cartão"],
+              ["fNatureza","natureza","Natureza"],["fDepto","depto","Departamento"],["fStatus","status","Status"]];
+function montaBarraFiltros() {
+  const f = PORTAL_SHELL.filtros;
+  f.innerHTML = `<span class="rot"><span class="material-symbols-outlined">filter_alt</span>Filtros</span>` +
+    FDEF.map(([id, , rot]) => `<label class="ct-pill"><span>${rot}</span><select class="portal-sel" id="${id}" aria-label="${rot}"><option value="">Todos</option></select></label>`).join("") +
+    `<button type="button" class="ct-limpar" id="btnClear"><span class="material-symbols-outlined">filter_alt_off</span>Limpar filtros</button>`;
+  FDEF.forEach(([id]) => { $("#" + id).onchange = () => { STATE.lanc.pg = 1; STATE.tree.dep = null; STATE.tree.nat = null; render(); }; });
+  $("#btnClear").onclick = () => { FDEF.forEach(([id]) => $("#" + id).value = ""); STATE.lanc.pg = 1; STATE.tree.dep = null; STATE.tree.nat = null; render(); };
+}
+function buildFilters() {
+  FDEF.forEach(([id, key]) => {
+    const el = $("#" + id), cur = el.value;
+    let vals = [...new Set(STATE.rows.map(r => r[key]))].filter(v => v !== null && v !== "");
+    vals = key === "mes" ? MESES.filter(m => vals.includes(m)) : vals.sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
+    el.innerHTML = '<option value="">Todos</option>' + vals.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+    if (vals.map(String).includes(cur)) el.value = cur;
+  });
+  const st = [...new Set(STATE.rows.map(r => r.status))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const sel = $("#lcStatus"), c = STATE.lanc.st;
+  sel.innerHTML = '<option value="">Todos os status</option>' + st.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  sel.value = st.includes(c) ? c : ""; STATE.lanc.st = sel.value;
+}
+function applyFilters() {
+  const f = Object.fromEntries(FDEF.map(([id, key]) => [key, $("#" + id).value]));
+  FDEF.forEach(([id]) => $("#" + id).closest(".ct-pill").classList.toggle("ativo", !!$("#" + id).value));
+  return STATE.rows.filter(r => FDEF.every(([, k]) => !f[k] || String(r[k]) === f[k]));
+}
+
+/* -------------------------------- AGG ---------------------------------- */
+const sum = a => a.reduce((s, r) => s + r.valor, 0);
+function groupBy(rows, key) {
+  const m = new Map(); rows.forEach(r => m.set(r[key], (m.get(r[key]) || 0) + r.valor));
+  return [...m].map(([k, v]) => ({ k: String(k), v })).sort((a, b) => b.v - a.v);
+}
+function byMonth(rows) {
+  const m = new Map();
+  rows.forEach(r => { const k = r.ano + "-" + p2(r.numMes); const o = m.get(k) || { v: 0, n: 0 }; o.v += r.valor; o.n++; m.set(k, o); });
+  return [...m].sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, o]) => ({ k, label: MESES[+k.slice(5) - 1].slice(0, 3) + "/" + k.slice(2, 4), v: o.v, n: o.n }));
+}
+const movAvg = m => m.map((_, i) => { const s = m.slice(Math.max(0, i - 2), i + 1); return s.reduce((a, b) => a + b.v, 0) / s.length; });
+
+/* =========================================================================
+   VIEWS — cabeçalho, KPIs, gráficos, insights, árvore e tabelas
+   ========================================================================= */
+function montaCabecalhos() {
+  document.querySelectorAll(".ct-head").forEach(h => {
+    h.className = "portal-pagehead ct-head";
+    h.innerHTML = `<div><h1>${esc(h.dataset.t)}</h1><p>${esc(h.dataset.s)}<span class="ct-gerado"></span></p>
+        <div class="selos"><span class="portal-chip info ct-selo"></span></div></div>
+      <div class="ct-acoes">
+        <button type="button" class="ct-switch ct-auto" role="switch" aria-checked="true" title="Recarrega do Drive a cada 5 minutos"><i></i><b>Auto: ON</b></button>
+        <button type="button" class="portal-btn primario ct-atualizar"><span class="material-symbols-outlined">sync</span>Atualizar</button>
+        <button type="button" class="portal-btn ct-csv"><span class="material-symbols-outlined">table_chart</span>Exportar CSV</button>
+        <button type="button" class="portal-btn ct-imprimir"><span class="material-symbols-outlined">print</span>Imprimir</button>
+      </div>`;
+  });
+  document.querySelectorAll(".ct-auto").forEach(b => b.onclick = () => setAuto(!STATE.auto));
+  document.querySelectorAll(".ct-atualizar").forEach(b => b.onclick = async () => {
+    b.disabled = true; const ic = b.querySelector(".material-symbols-outlined"); ic.classList.add("portal-gira");
+    await refresh(true); ic.classList.remove("portal-gira"); b.disabled = false;
+  });
+  document.querySelectorAll(".ct-csv").forEach(b => b.onclick = exportCSV);
+  document.querySelectorAll(".ct-imprimir").forEach(b => b.onclick = () => window.print());
+}
+function renderCabecalhos(rows) {
+  const m = byMonth(rows);
+  const per = m.length ? (m.length > 1 ? m[0].label + " – " + m.at(-1).label : m[0].label) : "Sem movimento";
+  document.querySelectorAll(".ct-selo").forEach(e => e.textContent = per + " · " + num(rows.length) + " lançamentos");
+  document.querySelectorAll(".ct-gerado").forEach(e => e.textContent = STATE.geradoEm ? " · dados de " + fmtGerado(STATE.geradoEm) : "");
+}
+
+/* ------------------------------- KPIs ---------------------------------- */
+function sparkSVG(vals) {
+  if (vals.length < 2) return "";
+  const W = 200, H = 44, mx = Math.max(...vals), mn = Math.min(...vals), rg = (mx - mn) || 1;
+  const pts = vals.map((v, i) => [i / (vals.length - 1) * W, H - 4 - (v - mn) / rg * (H - 8)]);
+  const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  return `<svg class="ct-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Gasto mensal no período"><path class="a" d="${d} L${W} ${H} L0 ${H} Z"/><path class="l" d="${d}"/></svg>`;
+}
+function chipVar(v) {
+  if (v === null) return "";
+  const alta = v >= 0;
+  return `<span class="portal-chip ${alta ? "bad" : "ok"}"><span class="material-symbols-outlined">${alta ? "trending_up" : "trending_down"}</span>${Math.abs(v).toFixed(1)}%</span>`;
+}
+function renderKpis(rows) {
+  const total = sum(rows), qtd = rows.length, tkt = qtd ? total / qtd : 0;
+  const m = byMonth(rows), ult = m.at(-1), pen = m.at(-2), mm = movAvg(m);
+  const var_ = (ult && pen && pen.v) ? ((ult.v - pen.v) / pen.v * 100) : null;
+  const dep = groupBy(rows, "depto")[0], nat = groupBy(rows, "natureza")[0];
+  const k = (cls, rot, ic, val, sub, extra) => `<div class="portal-kpi ct-kpi c4 ${cls || ""}">
+    <div class="topo-k"><span class="rotulo">${rot}</span>${extra && extra.chip || `<span class="material-symbols-outlined" style="color:var(--outline)">${ic}</span>`}</div>
+    <div class="valor">${val}</div>${extra && extra.mid || ""}<div class="sub">${sub}</div></div>`;
+  $("#ct-kpis").innerHTML =
+    k("hero", "Gasto total", "payments", brl(total), `${num(qtd)} lançamentos no recorte`, { chip: chipVar(var_), mid: sparkSVG(m.map(x => x.v)) }) +
+    k("", "Ticket médio", "receipt", brl(tkt), "valor médio por lançamento") +
+    k("", "Último mês", "calendar_month", ult ? brl(ult.v) : "—",
+      var_ === null ? "sem base comparativa" : `<b class="${var_ >= 0 ? "neg" : "pos"}">${var_ >= 0 ? "▲" : "▼"} ${Math.abs(var_).toFixed(1)}%</b> vs. mês anterior`) +
+    k("", "Maior departamento", "account_tree", dep ? esc(dep.k) : "—", dep ? `${brl(dep.v)} · ${pct(dep.v, total).toFixed(1)}% do total` : "",
+      { mid: dep ? `<div class="portal-progress"><i style="width:${pct(dep.v, total).toFixed(1)}%"></i></div>` : "" }) +
+    k("", "Maior natureza", "category", nat ? esc(nat.k) : "—", nat ? `${brl(nat.v)} · ${pct(nat.v, total).toFixed(1)}% do total` : "",
+      { mid: nat ? `<div class="portal-progress"><i style="width:${pct(nat.v, total).toFixed(1)}%"></i></div>` : "" }) +
+    k("", "Média mensal", "avg_pace", m.length ? brl(total / m.length) : "—",
+      `${m.length} mês(es) com movimento` + (mm.length ? ` · média móvel 3M: ${brl(mm.at(-1))}` : ""));
+}
+
+/* ------------------------------ GRÁFICOS ------------------------------- */
+function hexA(c, a) {
+  const m = /^#([0-9a-f]{6})$/i.exec(c || ""); if (!m) return c;
+  const n = parseInt(m[1], 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+}
+const serie = i => COR("graf-" + (i % 8 + 1));
+function draw(id, cfg) { STATE.charts[id]?.destroy(); STATE.charts[id] = new Chart($("#" + id), cfg); }
+function baseTip() {
+  return { backgroundColor: COR("graf-tt-bg"), titleColor: COR("graf-tt-titulo"), bodyColor: COR("graf-tt-texto"), padding: 10, cornerRadius: 8, boxPadding: 4 };
+}
+function renderCharts(rows) {
+  Chart.defaults.font.family = 'Inter, system-ui, "Segoe UI", sans-serif';
+  Chart.defaults.color = COR("graf-texto");
+  const GRID = COR("graf-grade"), TXT = COR("graf-texto"), SURF = COR("lowest");
+  const tip = { ...baseTip(), callbacks: { label: c => ` ${c.label || c.dataset.label}: ${brl(c.parsed.y ?? c.parsed)}` } };
+  const leg = { position: "bottom", labels: { boxWidth: 10, color: TXT } };
+
+  const m = byMonth(rows), mm = movAvg(m);
+  draw("chMes", { data: { labels: m.map(x => x.label), datasets: [
+      { type: "bar", label: "Gasto do mês", data: m.map(x => x.v), backgroundColor: COR("graf-1"), hoverBackgroundColor: COR("graf-2"), borderRadius: 8, maxBarThickness: 46 },
+      { type: "line", label: "Média móvel 3M", data: mm, borderColor: COR("graf-6"), backgroundColor: COR("graf-6"), pointBackgroundColor: SURF, pointBorderColor: COR("graf-6"), tension: .35, pointRadius: 4, borderWidth: 2 }] },
+    options: { maintainAspectRatio: false, plugins: { tooltip: tip, legend: leg },
+      scales: { y: { ticks: { color: TXT, callback: v => "R$ " + num(v) }, grid: { color: GRID } }, x: { ticks: { color: TXT }, grid: { display: false } } } } });
+
+  const nat = groupBy(rows, "natureza"), tot = sum(rows);
+  draw("chNatureza", { type: "doughnut", data: { labels: nat.map(x => x.k), datasets: [{ data: nat.map(x => x.v), backgroundColor: nat.map((_, i) => serie(i)), borderWidth: 2, borderColor: SURF }] },
+    options: { maintainAspectRatio: false, cutout: "62%", plugins: { legend: { display: false },
+      tooltip: { ...baseTip(), callbacks: { label: c => ` ${c.label}: ${brl(c.parsed)} (${pct(c.parsed, tot).toFixed(1)}%)` } } } } });
+  $("#legNat").innerHTML = nat.map((x, i) => `<li><i style="background:${serie(i)}"></i><span class="nm" title="${esc(x.k)}">${esc(x.k)}</span><span class="vl">${brl(x.v)}</span><span class="pc">${pct(x.v, tot).toFixed(1)}%</span></li>`).join("");
+
+  const dep = groupBy(rows, "depto").slice(0, 10);
+  draw("chDepto", { type: "bar", data: { labels: dep.map(x => x.k), datasets: [{ label: "Valor", data: dep.map(x => x.v), backgroundColor: COR("graf-3"), hoverBackgroundColor: COR("graf-2"), borderRadius: 8 }] },
+    options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { ...baseTip(), callbacks: { label: c => ` ${brl(c.parsed.x)}` } } },
+      scales: { x: { ticks: { color: TXT, callback: v => "R$ " + num(v) }, grid: { color: GRID } }, y: { ticks: { color: TXT }, grid: { display: false } } } } });
+
+  const ban = groupBy(rows, "bandeira");
+  draw("chBandeira", { type: "doughnut", data: { labels: ban.map(x => x.k), datasets: [{ data: ban.map(x => x.v), backgroundColor: ban.map((_, i) => serie(i)), borderWidth: 2, borderColor: SURF }] },
+    options: { maintainAspectRatio: false, cutout: "55%", plugins: { legend: leg,
+      tooltip: { ...baseTip(), callbacks: { label: c => ` ${c.label}: ${brl(c.parsed)}` } } } } });
+
+  const st = groupBy(rows, "status");
+  const corSt = k => /valid/i.test(k) ? COR("ok") : /pend|aguard/i.test(k) ? COR("warn") : /recus|cancel|erro/i.test(k) ? COR("bad") : COR("graf-8");
+  draw("chStatus", { type: "doughnut", data: { labels: st.map(x => x.k), datasets: [{ data: st.map(x => x.v), backgroundColor: st.map(x => corSt(x.k)), borderWidth: 2, borderColor: SURF }] },
+    options: { maintainAspectRatio: false, cutout: "62%", plugins: { legend: leg,
+      tooltip: { ...baseTip(), callbacks: { label: c => ` ${c.label}: ${brl(c.parsed)}` } } } } });
+
+  const ord = [...rows].filter(r => r.data).sort((a, b) => a.data - b.data); let acc = 0;
+  const pts = ord.map(r => ({ x: fmtData(r.data), y: (acc += r.valor) }));
+  draw("chAcum", { type: "line", data: { labels: pts.map(p => p.x), datasets: [{ label: "Acumulado", data: pts.map(p => p.y),
+      borderColor: COR("graf-1"), backgroundColor: hexA(COR("graf-1"), .14), fill: true, tension: .3, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { display: false }, tooltip: { ...tip } },
+      scales: { y: { ticks: { color: TXT, callback: v => "R$ " + num(v) }, grid: { color: GRID } }, x: { grid: { display: false }, ticks: { color: TXT, maxTicksLimit: 12 } } } } });
+}
+
+/* ----------------------------- INSIGHTS -------------------------------- */
+function renderInsights(rows) {
+  const out = [], total = sum(rows), m = byMonth(rows);
+  const add = (type, h, p) => out.push({ type, h, p });
+  if (!rows.length) { $("#ct-insights").innerHTML = '<div class="portal-vazio">Sem dados no recorte atual.</div>'; return; }
+
+  if (m.length >= 2) {
+    const a = m.at(-2).v, b = m.at(-1).v, d = a ? ((b - a) / a * 100) : 0;
+    add(d > 0 ? "alert" : "pos", "Tendência recente",
+      `O gasto de <b>${m.at(-1).label}</b> foi de <b>${brl(b)}</b>, ${d >= 0 ? "aumento" : "redução"} de <b>${Math.abs(d).toFixed(1)}%</b> frente a ${m.at(-2).label} (${brl(a)}).`);
+  }
+  if (m.length >= 3) {
+    const first = m[0].v, last = m.at(-1).v;
+    add("idea", "Trajetória do período",
+      `Entre <b>${m[0].label}</b> e <b>${m.at(-1).label}</b> o patamar mensal ${last >= first ? "subiu" : "caiu"} de ${brl(first)} para ${brl(last)}. Média mensal de <b>${brl(total / m.length)}</b> — use-a como teto de referência no fluxo de caixa.`);
+  }
+  const dep = groupBy(rows, "depto"), nat = groupBy(rows, "natureza");
+  if (dep[0]) add("warn", "Concentração por departamento",
+    `<b>${esc(dep[0].k)}</b> concentra <b>${pct(dep[0].v, total).toFixed(1)}%</b> (${brl(dep[0].v)}) do gasto. ${dep.length > 1 ? `O segundo colocado, ${esc(dep[1].k)}, responde por ${pct(dep[1].v, total).toFixed(1)}%.` : ""}`);
+  if (nat[0]) add("idea", "Composição por natureza",
+    `A natureza <b>${esc(nat[0].k)}</b> lidera com <b>${brl(nat[0].v)}</b>. Renegociar contratos dessa linha tende a gerar o maior impacto na redução do custo total.`);
+
+  const vals = rows.map(r => r.valor), md = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const sd = Math.sqrt(vals.reduce((s, v) => s + (v - md) ** 2, 0) / vals.length);
+  const out2 = rows.filter(r => r.valor > md + 2 * sd).sort((a, b) => b.valor - a.valor);
+  if (out2.length) add("alert", "Alerta de anomalias",
+    `<b>${out2.length}</b> lançamento(s) acima de 2 desvios-padrão (limite ${brl(md + 2 * sd)}). Maior: <b>${esc(out2[0].descricao)}</b> — ${brl(out2[0].valor)} em ${fmtData(out2[0].data)} (${esc(out2[0].depto)}).`);
+  else add("pos", "Sem anomalias relevantes", "Nenhum lançamento ultrapassou 2 desvios-padrão da média: o padrão de gastos está homogêneo.");
+
+  const pend = rows.filter(r => !/valid/i.test(r.status));
+  if (pend.length) add("warn", "Pendências de validação",
+    `<b>${pend.length}</b> lançamento(s) somando <b>${brl(sum(pend))}</b> ainda não estão validados — regularize antes do fechamento.`);
+
+  const cart = groupBy(rows, "cartao");
+  if (cart.length > 1) add("idea", "Comparativo entre cartões",
+    `O cartão <b>${esc(cart[0].k)}</b> responde por ${brl(cart[0].v)} (${pct(cart[0].v, total).toFixed(1)}%), contra ${brl(cart.at(-1).v)} do cartão ${esc(cart.at(-1).k)}. Avalie redistribuir limites conforme o uso real.`);
+
+  const ic = { alert: "warning", pos: "check_circle", warn: "error_outline", idea: "lightbulb" };
+  $("#ct-insights").innerHTML = out.map(i => `<div class="portal-card ct-ins k-${i.type}"><div class="ic"><span class="material-symbols-outlined">${ic[i.type]}</span></div>
+    <div><div class="h">${i.h}</div><p>${i.p}</p></div></div>`).join("");
+}
+
+/* ----------------------- EVOLUÇÃO / DEPTOS / NATUREZAS ------------------ */
+function renderEvolucao(rows) {
+  const m = byMonth(rows), mm = movAvg(m), total = sum(rows), mx = Math.max(0, ...m.map(x => x.v));
+  if (!m.length) { $("#ct-tbl-mes").innerHTML = '<tbody><tr><td class="c muted">Sem dados no recorte atual.</td></tr></tbody>'; return; }
+  $("#ct-tbl-mes").innerHTML = `<thead><tr><th>Mês</th><th class="num">Lançamentos</th><th class="num">Valor</th><th class="num">Var. vs. mês anterior</th><th class="num">Média móvel 3M</th><th>% do total</th></tr></thead><tbody>` +
+    m.map((x, i) => { const p = i ? m[i - 1].v : 0, v = p ? (x.v - p) / p * 100 : null;
+      return `<tr><td><b>${x.label}</b></td><td class="num">${num(x.n)}</td><td class="num"><b>${brl(x.v)}</b></td>
+        <td class="num">${v === null ? '<span class="muted">—</span>' : `<span class="${v >= 0 ? "neg" : "pos"}">${v >= 0 ? "▲" : "▼"} ${Math.abs(v).toFixed(1)}%</span>`}</td>
+        <td class="num">${brl(mm[i])}</td>
+        <td><div class="ct-bar-in"><div class="portal-progress"><i style="width:${pct(x.v, mx).toFixed(1)}%"></i></div><span class="num muted">${pct(x.v, total).toFixed(1)}%</span></div></td></tr>`; }).join("") +
+    `</tbody><tfoot><tr><td>Total</td><td class="num">${num(rows.length)}</td><td class="num">${brl(total)}</td><td></td><td class="num">${brl(total / m.length)}</td><td class="muted">média mensal</td></tr></tfoot>`;
+}
+function tabelaRank(id, rows, key, rot) {
+  const g = groupBy(rows, key), total = sum(rows), mx = g[0] ? g[0].v : 0;
+  const cnt = new Map(); rows.forEach(r => cnt.set(r[key], (cnt.get(r[key]) || 0) + 1));
+  $(id).innerHTML = `<thead><tr><th>${rot}</th><th class="num">Lanç.</th><th class="num">Valor</th><th>% do total</th></tr></thead><tbody>` +
+    (g.length ? g.map(x => `<tr><td>${esc(x.k)}</td><td class="num">${num(cnt.get(x.k))}</td><td class="num"><b>${brl(x.v)}</b></td>
+      <td><div class="ct-bar-in"><div class="portal-progress"><i style="width:${pct(x.v, mx).toFixed(1)}%"></i></div><span class="num muted">${pct(x.v, total).toFixed(1)}%</span></div></td></tr>`).join("")
+      : '<tr><td colspan="4" class="c muted">Sem dados no recorte atual.</td></tr>') +
+    `</tbody><tfoot><tr><td>Total</td><td class="num">${num(rows.length)}</td><td class="num">${brl(total)}</td><td></td></tr></tfoot>`;
+}
+
+/* ------------------- ÁRVORE Ano > Departamento > Natureza > Descrição ---- */
+function renderTree(rows) {
+  const t = $("#ct-tree");
+  if (!rows.length) { t.innerHTML = '<div class="portal-vazio">Sem dados no recorte atual.</div>'; return; }
+  t.innerHTML = "";
+  const total = sum(rows), tr = STATE.tree;
+  const lvl = (title, items, max, onClick, selKey) => {
+    const c = document.createElement("div"); c.className = "ct-lv";
+    c.innerHTML = `<div class="ct-lv-h">${esc(title)}</div>`;
+    items.slice(0, 12).forEach(it => {
+      const n = document.createElement("div");
+      n.className = "ct-no" + (onClick ? " clk" : "") + (selKey === it.k ? " sel" : "");
+      n.innerHTML = `<div class="n"><span>${esc(it.k)}</span><span>${brl(it.v)}</span></div>
+        <div class="b"><i style="width:${max ? (it.v / max * 100).toFixed(1) : 0}%"></i></div>
+        <div class="s">${total ? (it.v / total * 100).toFixed(1) : 0}% do total</div>`;
+      if (onClick) n.onclick = () => onClick(it.k);
+      c.appendChild(n);
+    });
+    t.appendChild(c);
+  };
+  const anos = groupBy(rows, "ano");
+  lvl("Ano / Total", anos, anos[0] ? anos[0].v : 0);
+  const deps = groupBy(rows, "depto");
+  lvl("Departamento", deps, deps[0] ? deps[0].v : 0, k => { tr.dep = tr.dep === k ? null : k; tr.nat = null; renderTree(rows); }, tr.dep);
+  const r2 = tr.dep ? rows.filter(r => String(r.depto) === tr.dep) : rows;
+  const nats = groupBy(r2, "natureza");
+  lvl("Natureza" + (tr.dep ? " · " + tr.dep : ""), nats, nats[0] ? nats[0].v : 0, k => { tr.nat = tr.nat === k ? null : k; renderTree(rows); }, tr.nat);
+  const r3 = tr.nat ? r2.filter(r => String(r.natureza) === tr.nat) : r2;
+  const des = groupBy(r3, "descricao");
+  lvl("Descrição" + (tr.nat ? " · " + tr.nat : ""), des, des[0] ? des[0].v : 0);
+}
+/* ------------------------------ LANÇAMENTOS ----------------------------- */
+function lancView() {
+  const L = STATE.lanc, q = L.q.trim().toLowerCase();
+  let r = STATE.filtered.filter(x => (!L.st || x.status === L.st) &&
+    (!q || [x.descricao, x.cartao, x.natureza, x.depto, x.bandeira, x.status, x.mes, fmtData(x.data), brl(x.valor)].some(s => String(s).toLowerCase().includes(q))));
+  const k = L.sk, d = L.sd;
+  r = [...r].sort((a, b) => {
+    const av = k === "data" ? (a.data ? +a.data : 0) : k === "valor" ? a.valor : String(a[k]);
+    const bv = k === "data" ? (b.data ? +b.data : 0) : k === "valor" ? b.valor : String(b[k]);
+    return (typeof av === "number" ? av - bv : av.localeCompare(bv, "pt-BR")) * d;
+  });
+  return r;
+}
+const COLS = [["data","Data"],["bandeira","Bandeira"],["cartao","Cartão"],["natureza","Natureza"],["descricao","Descrição"],["depto","Departamento"],["status","Status"],["valor","Valor"]];
+function renderLanc() {
+  const L = STATE.lanc, r = lancView(), pages = Math.max(1, Math.ceil(r.length / L.ps));
+  if (L.pg > pages) L.pg = pages; if (L.pg < 1) L.pg = 1;
+  const ini = (L.pg - 1) * L.ps, fatia = r.slice(ini, ini + L.ps);
+  const seta = k => L.sk === k ? `<span class="material-symbols-outlined">${L.sd > 0 ? "arrow_upward" : "arrow_downward"}</span>` : "";
+  $("#ct-tbl-lanc").innerHTML = `<thead><tr>${COLS.map(([k, n]) => `<th class="ct-th ${k === "valor" ? "num" : ""}" data-sk="${k}" aria-sort="${L.sk === k ? (L.sd > 0 ? "ascending" : "descending") : "none"}">${n} ${seta(k)}</th>`).join("")}</tr></thead><tbody>` +
+    (fatia.length ? fatia.map(x => `<tr title="${esc(x.descricao)}"><td class="nowrap">${fmtData(x.data)}</td><td>${esc(x.bandeira)}</td><td>${esc(x.cartao)}</td><td>${esc(x.natureza)}</td>
+      <td class="ct-desc">${esc(x.descricao)}</td><td>${esc(x.depto)}</td><td><span class="portal-chip ${/valid/i.test(x.status) ? "ok" : "warn"}">${esc(x.status)}</span></td><td class="num"><b>${brl(x.valor)}</b></td></tr>`).join("")
+      : '<tr><td colspan="8" class="c muted">Nenhum lançamento encontrado.</td></tr>') +
+    `</tbody><tfoot><tr><td colspan="7">Total (${num(r.length)} lançamentos)</td><td class="num">${brl(sum(r))}</td></tr></tfoot>`;
+  $("#ct-tbl-lanc").querySelectorAll("th[data-sk]").forEach(th => th.onclick = () => {
+    const k = th.dataset.sk; if (L.sk === k) L.sd = -L.sd; else { L.sk = k; L.sd = (k === "valor" || k === "data") ? -1 : 1; } L.pg = 1; renderLanc();
+  });
+  $("#lcInfo").textContent = r.length ? `Mostrando ${ini + 1}–${ini + fatia.length} de ${num(r.length)}` : "Nenhum lançamento";
+  $("#lcPag").textContent = `Página ${L.pg} de ${pages}`;
+  $("#lcAnt").disabled = L.pg <= 1; $("#lcProx").disabled = L.pg >= pages;
+  $("#ct-lanc-resumo").textContent = `${num(r.length)} lançamento(s) · ${brl(sum(r))}`;
+}
+
+/* ------------------------------ EXPORTAR CSV ---------------------------- */
+function exportCSV() {
+  const r = lancView();
+  if (!r.length) { toast("Não há lançamentos para exportar."); return; }
+  const q = v => { v = String(v == null ? "" : v); return /[;"\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const linhas = [COLS.map(c => c[1]).join(";")].concat(r.map(x =>
+    [fmtData(x.data), x.bandeira, x.cartao, x.natureza, x.descricao, x.depto, x.status, x.valor.toFixed(2).replace(".", ",")].map(q).join(";")));
+  const blob = new Blob(["﻿" + linhas.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const d = new Date(), nome = "cartoes_lancamentos_" + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + ".csv";
+  try {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast("CSV exportado: " + r.length + " lançamentos.");
+  } catch (e) { toast("Não foi possível exportar: " + e.message); }
+}
+
+/* ------------------------------- RENDER -------------------------------- */
+function render() {
+  const rows = applyFilters(); STATE.filtered = rows;
+  renderCabecalhos(rows); renderKpis(rows); renderCharts(rows); renderInsights(rows);
+  renderEvolucao(rows); tabelaRank("#ct-tbl-dep", rows, "depto", "Departamento"); tabelaRank("#ct-tbl-nat", rows, "natureza", "Natureza");
+  renderTree(rows); renderLanc();
+}
+
+/* =========================================================================
+   APP — ligações de interface e boot
+   ========================================================================= */
+PORTAL_SHELL.init({
+  chave: "cartoes", titulo: "Cartões Corporativos", inicial: "visao",
+  dashboards: <?!= JSON.stringify(DASHBOARDS) ?>,
+  paginas: [
+    { id: "visao", rotulo: "Visão Geral", icone: "space_dashboard" },
+    { id: "evolucao", rotulo: "Evolução", icone: "trending_up" },
+    { id: "deptos", rotulo: "Departamentos e Naturezas", icone: "account_tree" },
+    { id: "lancamentos", rotulo: "Lançamentos", icone: "receipt_long" }
+  ],
+  exportar: [
+    { rotulo: "Exportar CSV", icone: "table_chart", fn: exportCSV },
+    { rotulo: "Imprimir", icone: "print", fn: () => window.print() }
+  ],
+  atualizar: () => refresh(true),
+  onNavegar: () => setTimeout(() => Object.values(STATE.charts).forEach(c => c && c.resize()), 30)
+});
+montaBarraFiltros();
+montaCabecalhos();
+
+$("#lcBusca").oninput = e => { STATE.lanc.q = e.target.value; STATE.lanc.pg = 1; renderLanc(); };
+$("#lcStatus").onchange = e => { STATE.lanc.st = e.target.value; STATE.lanc.pg = 1; renderLanc(); };
+$("#lcTam").onchange = e => { STATE.lanc.ps = +e.target.value; STATE.lanc.pg = 1; renderLanc(); };
+$("#lcAnt").onclick = () => { STATE.lanc.pg--; renderLanc(); };
+$("#lcProx").onclick = () => { STATE.lanc.pg++; renderLanc(); };
+
+document.addEventListener("portal:tema", () => { if (STATE.rows.length) renderCharts(STATE.filtered); });
+/* Ao voltar para a aba, confere se há dado novo (sem recarregar se nada mudou). */
+document.addEventListener("visibilitychange", () => { if (!document.hidden && STATE.auto) refresh(false); });
+
+(function boot() {
+  setAuto(lsGet("dashAuto") !== "0");
+  const cached = loadCache();
+  refresh(!cached).then(() => { if (cached) refresh(false); });
+})();
+</script>
+</body>
+</html>
