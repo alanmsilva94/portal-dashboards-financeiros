@@ -1,0 +1,29 @@
+{
+  "destino": "../dados_para_drive",
+  "dashboards": {
+    "analise": {
+      "pasta": "analise_semanal",
+      "origem": "C:\\Dados\\Analise_Semanal\\bd",
+      "padroes": ["**/*.xlsx"]
+    },
+    "cartoes": {
+      "pasta": "cartoes",
+      "origem": "C:\\Dados\\Cartoes_Corporativos\\Cartoes",
+      "padroes": ["base_de_dados.xlsx"]
+    },
+    "fluxo": {
+      "pasta": "fluxo_de_caixa",
+      "reducer": "reducers/fluxo.py",
+      "origem": "C:\\Dados\\Fluxo_de_Caixa\\bd",
+      "padroes": ["**/*.xlsx"]
+    },
+    "maquinas": {
+      "pasta": "maquinas",
+      "linhas_por_parte": 40000,
+      "reducer": "reducers/maquinas.py",
+      "origem": "C:\\Dados\\Maquinas_Cartoes\\bd",
+      "padroes": ["**/*.xlsx"]
+    }
+  }
+}
+
