@@ -1,0 +1,1 @@
+# Dados reais nunca vao para o repositorio\ndados_para_drive/\n*.xlsx\n*.xls\n*.csv\n!dados_exemplo/**\n\n# Configuracao local (copie de sincronizador/config.json e ajuste)\nsincronizador/config.local.json\n.env\n\n# Backups, temporarios e sistema\nbackups/\n__pycache__/\n*.pyc\nThumbs.db\n.DS_Store\n
