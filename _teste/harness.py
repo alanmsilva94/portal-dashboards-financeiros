@@ -6,7 +6,7 @@ Simula o Apps Script localmente para testar um dashboard no navegador.
 
 - Renderiza apps_script/<arquivo>.html resolvendo <?!= include('x') ?>, <?= APP_URL ?>, <?= EMAIL ?>,
   <?= CHAVE ?> e <?!= JSON.stringify(...) ?> dessas variáveis.
-- Injeta um stub de google.script.run (api_listar / api_ler) que lê os JSON gerados
+- Injeta um stub de google.script.run (api_listar / api_ler / api_ler_tudo) que lê os JSON gerados
   por sincronizador/exportar_para_drive.py (mesma estrutura do Drive).
 - Qualquer outra função de servidor chamada pelo dashboard cai em erro claro no console.
 """
@@ -61,7 +61,7 @@ STUB = """<script>
 window.google = { script: { run: (function () {
   function criar(ok, err) {
     var o = { withSuccessHandler: function (f) { return criar(f, err); }, withFailureHandler: function (f) { return criar(ok, f); } };
-    ['api_listar', 'api_ler', 'api_conf_ler', 'api_conf_salvar'].forEach(function (fn) {
+    ['api_listar', 'api_ler', 'api_ler_tudo', 'api_conf_ler', 'api_conf_salvar'].forEach(function (fn) {
       o[fn] = function () {
         var a = Array.prototype.slice.call(arguments);
         fetch('/__api/' + fn + '?args=' + encodeURIComponent(JSON.stringify(a)))
@@ -107,6 +107,18 @@ def main():
                         pasta = (Path(a.dados) / PASTAS[args[0]]) if args and args[0] in PASTAS else raiz
                         m = json.loads((pasta / "manifest.json").read_text(encoding="utf-8"))
                         res = {"geradoEm": m["geradoEm"], "arquivos": m["arquivos"]}
+                    elif fn == "api_ler_tudo":
+                        pasta = (Path(a.dados) / PASTAS[args[0]]) if args and args[0] in PASTAS else raiz
+                        m = json.loads((pasta / "manifest.json").read_text(encoding="utf-8"))
+                        igual = bool(len(args) > 1 and args[1] and args[1] == m["geradoEm"])
+                        dados = None
+                        if not igual:
+                            dados = {}
+                            for arq in m["arquivos"]:
+                                for nome in arq.get("partes") or [arq["arquivo"]]:
+                                    if nome not in dados:
+                                        dados[nome] = json.loads((pasta / nome).read_text(encoding="utf-8"))["abas"]
+                        res = {"geradoEm": m["geradoEm"], "arquivos": m["arquivos"], "igual": igual, "dados": dados}
                     elif fn == "api_conf_ler":
                         res = list(CONF.values())
                     elif fn == "api_conf_salvar":
