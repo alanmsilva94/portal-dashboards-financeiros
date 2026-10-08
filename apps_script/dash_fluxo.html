@@ -1119,10 +1119,9 @@ function initApp(data){
       aviso.innerHTML = `<div class="fx-aviso">
         <b>Dado ainda não carregado.</b><br>
         Esta rosca mostra a distribuição por setor <b>do mês fechado</b> (não da média do ano).
-        Isso exige o rateio mensal por departamento, que vem do arquivo
-        <code>Saídas &lt;ANO&gt;.xlsx</code>.<br><br>
-        Rode <code>python atualizar_dashboard.py --recalcular-setores</code> na máquina
-        onde o <code>S:\\</code> está mapeado e o gráfico aparece automaticamente.
+        Isso exige o rateio mensal por departamento, que vem da
+        base de dados do Drive (Saídas de cada ano).<br><br>
+        Atualize a base de dados do Drive com o sincronizador e o gráfico aparece automaticamente.
       </div>`;
       return;
     }
@@ -1159,9 +1158,9 @@ function initApp(data){
     if(presentes.indexOf('Audiovisual') === -1){
       document.getElementById('avisoEvolucaoAudiovisual').innerHTML = `<div class="fx-aviso">
         <b>Audiovisual ainda não incluído.</b> A série anual de Audiovisual (2022–2026) precisa ser
-        apurada nos arquivos <code>Saídas &lt;ANO&gt;.xlsx</code> de cada ano — ela não existe nas
-        três planilhas dedicadas de Obras/Imóveis/Comunicação.<br>
-        Rode <code>python atualizar_dashboard.py --recalcular-setores</code> para preenchê-la.
+        apurada na base de dados do Drive (Saídas de cada ano) — ela não existe nas
+        três bases dedicadas de Obras/Imóveis/Comunicação.<br>
+        Atualize a base de dados do Drive com o sincronizador para preenchê-la.
       </div>`;
     }
   })();
@@ -1205,8 +1204,8 @@ function initApp(data){
         <b>Dado ainda não carregado.</b><br>
         Esta tabela abre o gasto de <b>cada setor mês a mês</b> em ${anoAlvo}. Hoje o payload guarda
         apenas a média anual por setor e a série mensal de Obras, Imóveis e Comunicação — falta o
-        rateio mensal dos demais departamentos, que vem do <code>Saídas ${anoAlvo}.xlsx</code>.<br><br>
-        Rode <code>python atualizar_dashboard.py --recalcular-setores</code> e a tabela aparece
+        rateio mensal dos demais departamentos, que vem da base de dados do Drive (Saídas de ${anoAlvo}).<br><br>
+        Atualize a base de dados do Drive com o sincronizador e a tabela aparece
         preenchida, sem precisar mexer no HTML.
       </div>`;
       return;
@@ -1369,11 +1368,11 @@ function initApp(data){
       row.style.display = 'none';
       aviso.innerHTML = `<div class="fx-aviso">
         <b>Série mensal de Audiovisual ainda não carregada.</b><br>
-        Comunicação, Obras e Imóveis têm planilha dedicada com histórico desde jan/2018.
-        Audiovisual não tem — o histórico mensal dele precisa ser apurado nos arquivos
-        <code>Saídas &lt;ANO&gt;.xlsx</code>, agrupando a coluna <code>Departamento</code> por mês.<br><br>
-        Rode <code>python atualizar_dashboard.py --recalcular-setores</code>: o script varre todos os
-        arquivos <code>Saídas &lt;ANO&gt;.xlsx</code> que encontrar na pasta e monta a série completa.
+        Comunicação, Obras e Imóveis têm base dedicada com histórico desde jan/2018.
+        Audiovisual não tem — o histórico mensal dele precisa ser apurado na base de dados do Drive
+        (Saídas de cada ano), agrupando a coluna <code>Departamento</code> por mês.<br><br>
+        Atualize a base de dados do Drive com o sincronizador: o dashboard monta a série completa
+        a partir de todos os anos disponíveis.
       </div>`;
       return;
     }
@@ -1653,7 +1652,7 @@ window.__FLUXO_UI = {
   },
   aplicado(meta, dados){
     const n = (meta.arquivos || []).length;
-    SHELL.setStatus({ fonte:'Fonte: Google Drive · ' + n + (n===1?' planilha':' planilhas'), dados: meta.sincronizadoEm || meta.geradoEm || '' });
+    SHELL.setStatus({ fonte:'Fonte: Google Drive · ' + n + (n===1?' arquivo da base':' arquivos da base'), dados: meta.sincronizadoEm || meta.geradoEm || '' });
   }
 };
 

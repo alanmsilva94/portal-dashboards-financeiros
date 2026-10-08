@@ -1,5 +1,5 @@
 /**
- * Portal de Dashboards Financeiros - Web App (Google Apps Script)
+ * Portal de Dashboards Financeiros v9 - Web App (Google Apps Script)
  *
  * Rotas (?p=):
  *   login    -> tela de entrada (padrão quando não há ?p=)
@@ -172,6 +172,81 @@ function api_conf_salvar(chave, itens) {
 function api_listar(chave) {
   const m = lerJson_(pastaDados_(chave), 'manifest.json');
   return { geradoEm: m.geradoEm, arquivos: m.arquivos };
+}
+
+/* ------------------------------------------------------------------ *
+ *  Leitura em lote (1 chamada por dashboard) + cache do servidor
+ *  O cache fica no CacheService (até 6 h), em pedaços de 30 mil caracteres
+ *  (limite de 100 KB por valor). A chave inclui 'geradoEm' do manifesto:
+ *  quando o sincronizador exporta de novo, a chave muda e o cache antigo
+ *  deixa de ser usado. O acesso do usuário é sempre conferido antes.
+ * ------------------------------------------------------------------ */
+
+const CACHE_TAM_PEDACO_ = 30000;
+const CACHE_TTL_ = 21600;
+
+function cacheLer_(prefixo) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const n = parseInt(cache.get(prefixo + ':n'), 10);
+    if (!n) return null;
+    const chaves = [];
+    for (let i = 0; i < n; i++) chaves.push(prefixo + ':' + i);
+    const got = cache.getAll(chaves);
+    let texto = '';
+    for (let i = 0; i < n; i++) {
+      const p = got[prefixo + ':' + i];
+      if (p == null) return null;
+      texto += p;
+    }
+    return JSON.parse(texto);
+  } catch (e) {
+    return null;
+  }
+}
+
+function cacheGravar_(prefixo, obj) {
+  try {
+    const texto = JSON.stringify(obj);
+    const tudo = {};
+    let n = 0;
+    for (let i = 0; i < texto.length; i += CACHE_TAM_PEDACO_) {
+      tudo[prefixo + ':' + n] = texto.substring(i, i + CACHE_TAM_PEDACO_);
+      n++;
+    }
+    tudo[prefixo + ':n'] = String(n);
+    CacheService.getScriptCache().putAll(tudo, CACHE_TTL_);
+  } catch (e) {
+    // sem cache (ex.: limite excedido): a leitura segue normal, só mais lenta
+  }
+}
+
+/** Lê todos os arquivos do manifesto de uma vez.
+ *  geradoEmCliente: 'geradoEm' que o navegador já tem guardado (ou vazio).
+ *  Devolve { geradoEm, arquivos, igual, dados }:
+ *    igual = true  -> o navegador já tem a versão atual; 'dados' vem null.
+ *    igual = false -> 'dados' = { nomeDoArquivo: { nomeDaAba: [[linha], ...] } } */
+function api_ler_tudo(chave, geradoEmCliente) {
+  const pasta = pastaDados_(chave);               // confere o acesso do usuário
+  const m = lerJson_(pasta, 'manifest.json');
+  const resp = { geradoEm: m.geradoEm, arquivos: m.arquivos, igual: false, dados: null };
+  if (geradoEmCliente && String(geradoEmCliente) === String(m.geradoEm)) {
+    resp.igual = true;
+    return resp;
+  }
+  const prefixo = 'portal2:' + chave + ':' + m.geradoEm;
+  let dados = cacheLer_(prefixo);
+  if (!dados) {
+    dados = {};
+    m.arquivos.forEach(function (a) {
+      (a.partes || [a.arquivo]).forEach(function (nome) {
+        if (!dados[nome]) dados[nome] = lerJson_(pasta, nome).abas;
+      });
+    });
+    cacheGravar_(prefixo, dados);
+  }
+  resp.dados = dados;
+  return resp;
 }
 
 /** Devolve {abas: {nomeDaAba: [[linha], ...]}} de um arquivo listado no manifesto. */

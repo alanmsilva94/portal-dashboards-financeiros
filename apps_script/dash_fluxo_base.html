@@ -123,7 +123,7 @@
       else indices[nomes[0]] = pos;
     });
     if (faltando.length) {
-      throw new Error('A planilha "' + nomeArquivo + '" não tem a(s) coluna(s): '
+      throw new Error('O arquivo da base "' + nomeArquivo + '" não tem a(s) coluna(s): '
         + faltando.join(', ') + '. Colunas encontradas: '
         + cabecalho.filter(Boolean).join(', ') + '.');
     }
@@ -133,9 +133,9 @@
   /* Linhas da primeira aba de um workbook SheetJS (vindo de PORTAL.carregar). */
   function linhasDaPlanilha(wb, nomeArquivo) {
     var ws = wb && wb.Sheets && wb.Sheets[wb.SheetNames[0]];
-    if (!ws) throw new Error('A planilha "' + nomeArquivo + '" está vazia.');
+    if (!ws) throw new Error('O arquivo da base "' + nomeArquivo + '" está vazio.');
     var linhas = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: false });
-    if (!linhas.length) throw new Error('A planilha "' + nomeArquivo + '" está vazia.');
+    if (!linhas.length) throw new Error('O arquivo da base "' + nomeArquivo + '" está vazio.');
     return linhas;
   }
 
@@ -312,10 +312,10 @@
     }
 
     if (!Object.keys(entMensal).length && !Object.keys(semEnt).length) {
-      throw new Error('Não há dados de entradas: a pasta não tem "entradas.xlsx".');
+      throw new Error('Não há dados de entradas na base de dados do Drive.');
     }
     if (!ultimoEnt && !ultimoSai && !semUltimo) {
-      throw new Error('Nenhuma planilha com datas válidas foi encontrada na pasta.');
+      throw new Error('Nenhum dado com datas válidas foi encontrado na base de dados do Drive.');
     }
 
     var fechEnt = maior(ultimoFechado(ultimoEnt, incluirParcial, hoje), semUltimo);
@@ -337,7 +337,7 @@
       serieSai.push(s == null ? 0 : arred(s));
     }
     if (faltas.length) {
-      avisos.push('Meses sem dado nas planilhas (gravados como zero): '
+      avisos.push('Meses sem dado na base de dados do Drive (gravados como zero): '
         + faltas.slice(0, 24).join(', ') + (faltas.length > 24 ? ' ...' : ''));
     }
 
@@ -429,7 +429,7 @@
       payload['setores' + ano] = (completo[String(ano)] || []).slice(0, 10);
       if (!completo[String(ano)]) {
         avisos.push('Sem dados de ' + ano + ': a rosca desse ano ficará vazia '
-          + '(falta o arquivo ' + ano + '.xlsx na pasta da base).');
+          + '(faltam as Saídas de ' + ano + ' na base de dados do Drive).');
       }
     });
 
@@ -540,7 +540,7 @@
     if (global.__erroDashboard) {
       dizer('Atenção: a base de ' + (m.geradoEm || 'data desconhecida') + ' foi lida, mas '
         + 'parte do dashboard não pôde ser montada com ela (' + global.__erroDashboard
-        + '). Confira as planilhas e use "Atualizar dados".', 'erro');
+        + '). Confira a base de dados do Drive e use "Atualizar dados".', 'erro');
       return;
     }
     if (ui().aplicado) ui().aplicado(m, d, null);
@@ -634,15 +634,15 @@
         + (a.tipo === 'entradas' ? 'entradas' : 'saídas') + (a.ano ? ' de ' + a.ano : '') + '.');
     });
     if (ignorados.length) {
-      avisos.push('Planilhas ignoradas (sem "entradas"/"saídas" nem um ano como 2026 no nome): '
+      avisos.push('Arquivos da base ignorados (sem "entradas"/"saídas" nem um ano como 2026 no nome): '
         + ignorados.join(', ') + '.');
     }
     if (escolhidos.length && !escolhidos.some(function (a) { return a.tipo === 'saidas'; })) {
-      avisos.push('Nenhuma planilha de SAÍDAS por ano foi encontrada (ex.: "Saidas_2026.xlsx" ou a pasta "Saídas"). '
+      avisos.push('Nenhum arquivo de SAÍDAS por ano foi encontrado na base de dados do Drive (pasta "Saídas"). '
         + 'Entradas e fluxo usam o histórico publicado, mas os gráficos e tabelas de setores ficam sem dados.');
     }
     if (escolhidos.length && !escolhidos.some(function (a) { return a.tipo === 'entradas'; })) {
-      avisos.push('Nenhuma planilha de ENTRADAS foi encontrada (ex.: "Entradas_2026.xlsx" ou a pasta "Entradas"): '
+      avisos.push('Nenhum arquivo de ENTRADAS foi encontrado na base de dados do Drive (pasta "Entradas"): '
         + 'as entradas vêm só do histórico publicado.');
     }
     return escolhidos;
@@ -676,12 +676,12 @@
       if (d.ultimo && (!ultimo || d.ultimo[0] > ultimo[0] || (d.ultimo[0] === ultimo[0] && d.ultimo[1] > ultimo[1]))) ultimo = d.ultimo;
     });
     if (duplicados.length) {
-      avisos.push('Mês presente em mais de uma planilha de entradas (os valores foram somados; confira se não há '
+      avisos.push('Mês presente em mais de um arquivo de entradas (os valores foram somados; confira se não há '
         + 'lançamento repetido): ' + duplicados.slice(0, 6).join('; ') + (duplicados.length > 6 ? '…' : '') + '.');
     }
     if (porAno.length && geral.length) {
-      avisos.push('Há planilhas de entradas por ano e também uma geral ("' + geral[0].nomeArquivo + '"): '
-        + 'os anos com planilha própria usam ela; a geral só completa os outros meses.');
+      avisos.push('Há arquivos de entradas por ano e também um geral ("' + geral[0].nomeArquivo + '"): '
+        + 'os anos com arquivo próprio usam ele; o geral só completa os outros meses.');
     }
     return { mensal: mensal, linhas: linhas, ultimo: ultimo, ultimoData: ultimoData };
   }
@@ -786,8 +786,8 @@
       }
     }).then(function (res) {
       if (!res.itens.length) {
-        throw new Error('Nenhuma planilha da base foi encontrada no Drive. Esperado: '
-          + '"Entradas_2026.xlsx" e "Saidas_2026.xlsx" (nas pastas "Entradas" e "Saídas"). '
+        throw new Error('Nenhum dado foi encontrado na base de dados do Drive. Esperado: '
+          + 'Entradas e Saídas do ano (pastas "Entradas" e "Saídas"). '
           + 'Confira se o sincronizador já exportou a pasta "fluxo_de_caixa".'
           + (ignorados.length ? ' Ignoradas: ' + ignorados.join(', ') + '.' : ''));
       }
@@ -814,7 +814,7 @@
     ocupar(true);
     dizer('Carregando os dados do Drive...');
     if (!global.DADOS_DASHBOARD) avisoSemBase('Carregando dados do Drive…',
-      'Estamos baixando as planilhas de Entradas e Saídas. Isso leva alguns segundos.');
+      'Estamos lendo a base de dados do Drive (Entradas e Saídas). Isso leva alguns segundos.');
     return lerDoDrive().then(function (r) {
       mostrarProgresso(null);
       var ok = aplicar(r.conteudo);

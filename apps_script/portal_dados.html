@@ -56,7 +56,76 @@ window.PORTAL = (function () {
     return wb;
   }
 
+  /* ---- cache no navegador (IndexedDB) -------------------------------------
+     Guarda os dados da última leitura, por usuário e dashboard. A cada abertura
+     o servidor só confirma se 'geradoEm' do manifesto mudou; se não mudou, os
+     dados guardados são usados e nada é baixado. Se o IndexedDB não estiver
+     disponível, tudo funciona igual, só sem o cache. */
+  var IDB_NOME = 'portal_cache_v1', IDB_LOJA = 'dados';
+
+  function idbAbrir() {
+    return new Promise(function (ok, erro) {
+      try {
+        var r = indexedDB.open(IDB_NOME, 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore(IDB_LOJA); };
+        r.onsuccess = function () { ok(r.result); };
+        r.onerror = function () { erro(r.error); };
+      } catch (e) { erro(e); }
+    });
+  }
+  function cacheLer(k) {
+    return idbAbrir().then(function (db) {
+      return new Promise(function (ok) {
+        var q = db.transaction(IDB_LOJA, 'readonly').objectStore(IDB_LOJA).get(k);
+        q.onsuccess = function () { ok(q.result || null); };
+        q.onerror = function () { ok(null); };
+      });
+    }).catch(function () { return null; });
+  }
+  function cacheGravar(k, v) {
+    return idbAbrir().then(function (db) {
+      return new Promise(function (ok) {
+        var t = db.transaction(IDB_LOJA, 'readwrite');
+        t.objectStore(IDB_LOJA).put(v, k);
+        t.oncomplete = function () { ok(); };
+        t.onerror = function () { ok(); };
+        t.onabort = function () { ok(); };
+      });
+    }).catch(function () {});
+  }
+
+  /* Leitura rápida: 1 chamada ao servidor (api_ler_tudo) + cache do navegador. */
   function carregar(chave, opcoes) {
+    opcoes = opcoes || {};
+    var cellDates = opcoes.cellDates !== false;
+    var chaveCache = EMAIL + '|' + chave;
+    return cacheLer(chaveCache).then(function (c) {
+      var guardado = c && c.dados && c.geradoEm ? c : null;
+      return chamar('api_ler_tudo', chave, guardado ? guardado.geradoEm : '').then(function (r) {
+        var dados = r.igual ? guardado.dados : r.dados;
+        if (!r.igual) cacheGravar(chaveCache, { geradoEm: r.geradoEm, dados: r.dados });
+        var arquivos = r.arquivos.filter(opcoes.filtro || function () { return true; });
+        var itens = arquivos.map(function (a, i) {
+          var abas = {};
+          (a.partes || [a.arquivo]).forEach(function (nome) {
+            var parte = dados[nome] || {};
+            Object.keys(parte).forEach(function (k) { abas[k] = (abas[k] || []).concat(parte[k]); });
+          });
+          var item = { nome: a.relPath.split('/').pop(), relPath: a.relPath, mtime: a.mtime, workbook: montarWorkbook(abas, cellDates) };
+          if (opcoes.onProgress) opcoes.onProgress(i + 1, arquivos.length, a.relPath);
+          return item;
+        });
+        return { geradoEm: r.geradoEm, itens: itens };
+      });
+    }).catch(function (e) {
+      // Servidor sem api_ler_tudo ou falha no lote: volta para a leitura arquivo a arquivo.
+      if (window.console) console.warn('Leitura em lote falhou, usando leitura por arquivo:', e);
+      return carregarPorArquivo(chave, opcoes);
+    });
+  }
+
+  /* Leitura antiga (1 chamada por arquivo), mantida como reserva. */
+  function carregarPorArquivo(chave, opcoes) {
     opcoes = opcoes || {};
     var cellDates = opcoes.cellDates !== false;
     return listar(chave).then(function (m) {
